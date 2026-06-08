@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+
+    <!-- PWA Manifest -->
+    <link rel="manifest" href="/manifest.json" />
+
+    <!-- App Title & Description -->
+    <title>DairyFlow — Dairy Farm Management</title>
+    <meta name="description" content="Manage milk entries, customers, billing, advances and feed for your dairy farm." />
+    <meta name="application-name" content="DairyFlow" />
+
+    <!-- Theme Colors -->
+    <meta name="theme-color" content="#0d9488" />
+    <meta name="msapplication-TileColor" content="#0f172a" />
+    <meta name="msapplication-navbutton-color" content="#0d9488" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+
+    <!-- Apple PWA support -->
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="DairyFlow" />
+    <link rel="apple-touch-icon" href="/logo.jpg" />
+
+    <!-- Favicon -->
+    <link rel="icon" type="image/jpeg" sizes="192x192" href="/logo.jpg" />
+    <link rel="icon" type="image/jpeg" sizes="512x512" href="/logo.jpg" />
+
+    <!-- Open Graph (for sharing) -->
+    <meta property="og:title" content="DairyFlow" />
+    <meta property="og:description" content="Dairy farm management made simple." />
+    <meta property="og:type" content="website" />
+    <meta property="og:image" content="/logo.jpg" />
+
+    <!-- Splash screen background while loading -->
+    <style>
+      body { margin: 0; background: #0f172a; }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
+

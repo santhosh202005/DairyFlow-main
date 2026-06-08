@@ -1,0 +1,13 @@
+rules_version = '2';
+
+// IMPORTANT: These rules allow open access for development.
+// Secure them before going to production!
+// See: https://firebase.google.com/docs/firestore/security/get-started
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /{document=**} {
+      allow read, write: if true;
+    }
+  }
+}

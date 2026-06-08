@@ -1,0 +1,55 @@
+{
+  "indexes": [
+    {
+      "collectionGroup": "milk_entries",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "customer_id", "order": "ASCENDING" },
+        { "fieldPath": "date", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "milk_entries",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "customer_id", "order": "ASCENDING" },
+        { "fieldPath": "date", "order": "ASCENDING" },
+        { "fieldPath": "shift", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "advances",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "customer_id", "order": "ASCENDING" },
+        { "fieldPath": "date", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "advances",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "type", "order": "ASCENDING" },
+        { "fieldPath": "date", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "advances",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "customer_id", "order": "ASCENDING" },
+        { "fieldPath": "type", "order": "ASCENDING" },
+        { "fieldPath": "date", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "feed_purchases",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "customer_id", "order": "ASCENDING" },
+        { "fieldPath": "date", "order": "DESCENDING" }
+      ]
+    }
+  ],
+  "fieldOverrides": []
+}
