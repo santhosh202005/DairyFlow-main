@@ -1,0 +1,23 @@
+services:
+  - type: web
+    name: dairyflow
+    runtime: node
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 3000
+      - key: DB_PATH
+        value: /var/data/dairy.db
+      - key: ADMIN_USERNAME
+        sync: false
+      - key: ADMIN_PASSWORD
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+    disk:
+      name: dairyflow-db
+      mountPath: /var/data
+      sizeGB: 1
