@@ -1,588 +1,460 @@
 import "dotenv/config";
 import express from "express";
 import { createServer as createViteServer } from "vite";
-import Database from "better-sqlite3";
+import { createClient } from "@libsql/client";
 import path from "path";
 import { fileURLToPath } from "url";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Use an environment variable for the DB path, fallback to local 'dairy.db'
-const dbPath = process.env.DB_PATH || "dairy.db";
-const db = new Database(dbPath);
+// ─── Turso / libSQL Client ───────────────────────────────────────────────────
+// For local dev: set TURSO_DB_URL=file:dairy.db  (no token needed)
+// For production: set TURSO_DB_URL and TURSO_DB_AUTH_TOKEN from turso.tech
+const db = createClient({
+  url: process.env.TURSO_DB_URL || "file:dairy.db",
+  authToken: process.env.TURSO_DB_AUTH_TOKEN,
+});
 
-// Simple Migration: Add type column if it doesn't exist
-try {
-  db.prepare("ALTER TABLE advances ADD COLUMN type TEXT NOT NULL DEFAULT 'advance'").run();
-} catch (e) {
-  // Column already exists or error
+// ─── Initialize Database ─────────────────────────────────────────────────────
+async function initDB() {
+  // Migrations
+  try { await db.execute("ALTER TABLE advances ADD COLUMN type TEXT NOT NULL DEFAULT 'advance'"); } catch (_) {}
+  try { await db.execute("ALTER TABLE customers ADD COLUMN default_rate REAL DEFAULT 30"); } catch (_) {}
+  try { await db.execute("ALTER TABLE milk_entries ADD COLUMN rate REAL NOT NULL DEFAULT 30"); } catch (_) {}
+
+  await db.executeMultiple(`
+    CREATE TABLE IF NOT EXISTS customers (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      phone TEXT,
+      address TEXT,
+      username TEXT UNIQUE,
+      password TEXT,
+      default_rate REAL DEFAULT 30,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS milk_entries (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      customer_id INTEGER NOT NULL,
+      date DATE NOT NULL,
+      shift TEXT NOT NULL DEFAULT 'AM',
+      liters REAL NOT NULL,
+      rate REAL NOT NULL DEFAULT 30,
+      amount REAL NOT NULL,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE CASCADE,
+      UNIQUE(customer_id, date, shift)
+    );
+
+    CREATE TABLE IF NOT EXISTS advances (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      customer_id INTEGER NOT NULL,
+      date DATE NOT NULL,
+      amount REAL NOT NULL,
+      type TEXT NOT NULL DEFAULT 'advance',
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS feed_types (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      rate REAL NOT NULL,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS feed_purchases (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      customer_id INTEGER NOT NULL,
+      feed_type_id INTEGER NOT NULL,
+      date DATE NOT NULL,
+      quantity REAL NOT NULL,
+      amount REAL NOT NULL,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE CASCADE,
+      FOREIGN KEY (feed_type_id) REFERENCES feed_types(id)
+    );
+  `);
 }
-
-try {
-  db.prepare("ALTER TABLE customers ADD COLUMN default_rate REAL DEFAULT 30").run();
-} catch (e) {
-  // Column already exists or error
-}
-
-try {
-  db.prepare("ALTER TABLE milk_entries ADD COLUMN rate REAL NOT NULL DEFAULT 30").run();
-} catch (e) {
-  // Column already exists or error
-}
-
-// Initialize Database
-db.exec(`
-  CREATE TABLE IF NOT EXISTS customers (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT NOT NULL,
-    phone TEXT,
-    address TEXT,
-    username TEXT UNIQUE,
-    password TEXT,
-    default_rate REAL DEFAULT 30,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-  );
-
-  CREATE TABLE IF NOT EXISTS milk_entries (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    customer_id INTEGER NOT NULL,
-    date DATE NOT NULL,
-    shift TEXT NOT NULL DEFAULT 'AM',
-    liters REAL NOT NULL,
-    rate REAL NOT NULL DEFAULT 30,
-    amount REAL NOT NULL,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE CASCADE,
-    UNIQUE(customer_id, date, shift)
-  );
-
-  CREATE TABLE IF NOT EXISTS advances (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    customer_id INTEGER NOT NULL,
-    date DATE NOT NULL,
-    amount REAL NOT NULL,
-    type TEXT NOT NULL DEFAULT 'advance', -- 'advance' or 'deduction'
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE CASCADE
-  );
-
-  CREATE TABLE IF NOT EXISTS feed_types (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT NOT NULL,
-    rate REAL NOT NULL,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-  );
-
-  CREATE TABLE IF NOT EXISTS feed_purchases (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    customer_id INTEGER NOT NULL,
-    feed_type_id INTEGER NOT NULL,
-    date DATE NOT NULL,
-    quantity REAL NOT NULL,
-    amount REAL NOT NULL,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE CASCADE,
-    FOREIGN KEY (feed_type_id) REFERENCES feed_types(id)
-  );
-`);
 
 async function startServer() {
+  await initDB();
+
   const app = express();
   const PORT = parseInt(process.env.PORT || "3000");
-
   app.use(express.json());
 
-  // --- PWA / TWA Support ---
-
-  // Digital Asset Links — required for Play Store TWA verification
-  // UPDATE sha256_cert_fingerprints with your actual keystore fingerprint before submitting to Play Store
-  app.get('/.well-known/assetlinks.json', (req, res) => {
-    const packageName = process.env.TWA_PACKAGE_NAME || 'com.yourname.dairyflow';
-    const fingerprint = process.env.TWA_FINGERPRINT || 'YOUR_SHA256_FINGERPRINT_HERE';
+  // ─── PWA / TWA ─────────────────────────────────────────────────────────────
+  app.get("/.well-known/assetlinks.json", (_req, res) => {
+    const packageName = process.env.TWA_PACKAGE_NAME || "com.yourname.dairyflow";
+    const fingerprint = process.env.TWA_FINGERPRINT || "YOUR_SHA256_FINGERPRINT_HERE";
     res.json([{
-      relation: ['delegate_permission/common.handle_all_urls'],
-      target: {
-        namespace: 'android_app',
-        package_name: packageName,
-        sha256_cert_fingerprints: [fingerprint]
-      }
+      relation: ["delegate_permission/common.handle_all_urls"],
+      target: { namespace: "android_app", package_name: packageName, sha256_cert_fingerprints: [fingerprint] }
     }]);
   });
 
-  // --- API Routes ---
+  // OTP Store (in-memory)
+  const otpStore = new Map<string, { otp: string; expiresAt: number }>();
 
-  // OTP Store (In-memory for simplicity)
-  const otpStore = new Map<string, { otp: string, expiresAt: number }>();
-
-  // Login
-  app.post("/api/login", (req, res) => {
+  // ─── LOGIN ──────────────────────────────────────────────────────────────────
+  app.post("/api/login", async (req, res) => {
     const { username: rawUsername, password } = req.body;
     const username = rawUsername?.trim();
     const adminUser = (process.env.ADMIN_USERNAME || "admin").trim();
     const adminPass = (process.env.ADMIN_PASSWORD || "admin123").trim();
 
     console.log(`[Login] Attempt for: "${username}"`);
-    
-    // Check Admin (Case-insensitive username)
+
     if (username && username.toLowerCase() === adminUser.toLowerCase() && password === adminPass) {
-      console.log('[Login] Admin login successful');
+      console.log("[Login] Admin login successful");
       return res.json({ success: true, token: "admin-token", role: "admin" });
     }
 
-    if (username?.toLowerCase() === adminUser.toLowerCase()) {
-       console.log('[Login] Admin username matched, but password failed');
-    }
-
-    // Check Customer
     try {
-      const customer = db.prepare("SELECT * FROM customers WHERE username = ? COLLATE NOCASE AND password = ?").get(username, password);
+      const result = await db.execute({
+        sql: "SELECT * FROM customers WHERE username = ? COLLATE NOCASE AND password = ?",
+        args: [username, password],
+      });
+      const customer = result.rows[0];
       if (customer) {
         console.log(`[Login] Customer login successful: ${customer.name}`);
-        return res.json({ 
-          success: true, 
-          token: `customer-token-${customer.id}`, 
+        return res.json({
+          success: true,
+          token: `customer-token-${customer.id}`,
           role: "customer",
           customerId: customer.id,
           customerName: customer.name,
           defaultRate: customer.default_rate,
           customerPhone: customer.phone,
-          customerAddress: customer.address
+          customerAddress: customer.address,
         });
-      } else {
-        console.log(`[Login] No customer found for username: "${username}" with provided password`);
       }
     } catch (dbError) {
-      console.error('[Login] Database error during customer lookup:', dbError);
+      console.error("[Login] DB error:", dbError);
     }
 
-    console.log('[Login] Failed: Invalid credentials');
     res.status(401).json({ success: false, message: "Invalid credentials" });
   });
 
-  // Request OTP
-  app.post("/api/request-otp", (req, res) => {
+  // ─── OTP ────────────────────────────────────────────────────────────────────
+  app.post("/api/request-otp", async (req, res) => {
     const { phone } = req.body;
-    
-    if (!phone) {
-      return res.status(400).json({ success: false, message: "Phone number is required" });
-    }
+    if (!phone) return res.status(400).json({ success: false, message: "Phone number is required" });
 
-    // Check if customer exists
-    const customer = db.prepare("SELECT * FROM customers WHERE phone = ?").get(phone);
-    if (!customer) {
-      return res.status(404).json({ success: false, message: "No customer found with this phone number" });
-    }
+    const result = await db.execute({ sql: "SELECT * FROM customers WHERE phone = ?", args: [phone] });
+    if (!result.rows[0]) return res.status(404).json({ success: false, message: "No customer found with this phone number" });
 
-    // Generate OTP (6 digits)
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
-    
-    // Store OTP (expires in 5 minutes)
     otpStore.set(phone, { otp, expiresAt: Date.now() + 5 * 60 * 1000 });
-
-    console.log(`[OTP] Generated for ${phone}: ${otp}`); // Logged for testing/demo purposes
-
+    console.log(`[OTP] Generated for ${phone}: ${otp}`);
     res.json({ success: true, message: "OTP sent successfully" });
   });
 
-  // Verify OTP
-  app.post("/api/verify-otp", (req, res) => {
+  app.post("/api/verify-otp", async (req, res) => {
     const { phone, otp } = req.body;
-
-    const storedOtpData = otpStore.get(phone);
-
-    if (!storedOtpData || storedOtpData.otp !== otp || storedOtpData.expiresAt < Date.now()) {
+    const stored = otpStore.get(phone);
+    if (!stored || stored.otp !== otp || stored.expiresAt < Date.now()) {
       return res.status(400).json({ success: false, message: "Invalid or expired OTP" });
     }
-
-    // Clear OTP
     otpStore.delete(phone);
 
-    // Get customer
-    const customer = db.prepare("SELECT * FROM customers WHERE phone = ?").get(phone);
-    
-    if (!customer) {
-        return res.status(404).json({ success: false, message: "Customer not found" });
-    }
+    const result = await db.execute({ sql: "SELECT * FROM customers WHERE phone = ?", args: [phone] });
+    const customer = result.rows[0];
+    if (!customer) return res.status(404).json({ success: false, message: "Customer not found" });
 
-    console.log(`[Login] Customer OTP login successful: ${customer.name}`);
-    res.json({ 
-      success: true, 
-      token: `customer-token-${customer.id}`, 
+    res.json({
+      success: true,
+      token: `customer-token-${customer.id}`,
       role: "customer",
       customerId: customer.id,
       customerName: customer.name,
       defaultRate: customer.default_rate,
       customerPhone: customer.phone,
-      customerAddress: customer.address
+      customerAddress: customer.address,
     });
   });
 
-  // Customers
-  app.get("/api/customers", (req, res) => {
-    const customers = db.prepare("SELECT * FROM customers ORDER BY name ASC").all();
-    res.json(customers);
+  // ─── CUSTOMERS ──────────────────────────────────────────────────────────────
+  app.get("/api/customers", async (_req, res) => {
+    const result = await db.execute("SELECT * FROM customers ORDER BY name ASC");
+    res.json(result.rows);
   });
 
-  app.post("/api/customers", (req, res) => {
+  app.post("/api/customers", async (req, res) => {
     const { name, phone, address, username, password, default_rate = 30 } = req.body;
-    const result = db.prepare("INSERT INTO customers (name, phone, address, username, password, default_rate) VALUES (?, ?, ?, ?, ?, ?)").run(name, phone, address, username || null, password || null, default_rate);
+    const result = await db.execute({
+      sql: "INSERT INTO customers (name, phone, address, username, password, default_rate) VALUES (?, ?, ?, ?, ?, ?)",
+      args: [name, phone, address, username || null, password || null, default_rate],
+    });
     res.json({ id: result.lastInsertRowid });
   });
 
-  app.put("/api/customers/:id", (req, res) => {
+  app.put("/api/customers/:id", async (req, res) => {
     const { name, phone, address, username, password, default_rate = 30 } = req.body;
-    db.prepare("UPDATE customers SET name = ?, phone = ?, address = ?, username = ?, password = ?, default_rate = ? WHERE id = ?").run(name, phone, address, username || null, password || null, default_rate, req.params.id);
+    await db.execute({
+      sql: "UPDATE customers SET name = ?, phone = ?, address = ?, username = ?, password = ?, default_rate = ? WHERE id = ?",
+      args: [name, phone, address, username || null, password || null, default_rate, req.params.id],
+    });
     res.json({ success: true });
   });
 
-  app.delete("/api/customers/:id", (req, res) => {
-    db.prepare("DELETE FROM customers WHERE id = ?").run(req.params.id);
+  app.delete("/api/customers/:id", async (req, res) => {
+    await db.execute({ sql: "DELETE FROM customers WHERE id = ?", args: [req.params.id] });
     res.json({ success: true });
   });
 
-  // Milk Entries
-  app.get("/api/entries", (req, res) => {
+  // ─── MILK ENTRIES ───────────────────────────────────────────────────────────
+  app.get("/api/entries", async (req, res) => {
     const customerId = req.query.customerId;
-    let query = `
-      SELECT e.*, c.name as customer_name 
-      FROM milk_entries e 
-      JOIN customers c ON e.customer_id = c.id 
-    `;
-    let params = [];
-    if (customerId) {
-      query += ` WHERE e.customer_id = ? `;
-      params.push(customerId);
-    }
-    query += ` ORDER BY e.date DESC, e.shift ASC, e.id DESC `;
-    
-    const entries = db.prepare(query).all(...params);
-    res.json(entries);
+    let sql = `SELECT e.*, c.name as customer_name FROM milk_entries e JOIN customers c ON e.customer_id = c.id`;
+    const args: any[] = [];
+    if (customerId) { sql += " WHERE e.customer_id = ?"; args.push(customerId); }
+    sql += " ORDER BY e.date DESC, e.shift ASC, e.id DESC";
+    const result = await db.execute({ sql, args });
+    res.json(result.rows);
   });
 
-  app.post("/api/entries", (req, res) => {
+  app.post("/api/entries", async (req, res) => {
     const { customer_id, date, shift, liters, rate: customRate } = req.body;
-    
-    // Determine rate: entry rate > customer default rate > 30
     let rate = customRate;
     if (rate === undefined || rate === null) {
-      const customer = db.prepare("SELECT default_rate FROM customers WHERE id = ?").get(customer_id);
-      rate = customer?.default_rate || 30;
+      const r = await db.execute({ sql: "SELECT default_rate FROM customers WHERE id = ?", args: [customer_id] });
+      rate = (r.rows[0]?.default_rate as number) || 30;
     }
-    
     const amount = liters * rate;
     try {
-      const result = db.prepare("INSERT INTO milk_entries (customer_id, date, shift, liters, rate, amount) VALUES (?, ?, ?, ?, ?, ?)").run(customer_id, date, shift || 'AM', liters, rate, amount);
+      const result = await db.execute({
+        sql: "INSERT INTO milk_entries (customer_id, date, shift, liters, rate, amount) VALUES (?, ?, ?, ?, ?, ?)",
+        args: [customer_id, date, shift || "AM", liters, rate, amount],
+      });
       res.json({ id: result.lastInsertRowid });
     } catch (err: any) {
-      if (err.code === 'SQLITE_CONSTRAINT_UNIQUE') {
-        return res.status(400).json({ success: false, message: `Entry already exists for ${shift} on ${date}` });
-      }
+      if (err.message?.includes("UNIQUE")) return res.status(400).json({ success: false, message: `Entry already exists for ${shift} on ${date}` });
       res.status(500).json({ success: false, message: "Server error" });
     }
   });
 
-  app.delete("/api/entries/:id", (req, res) => {
-    try {
-      const id = parseInt(req.params.id);
-      if (isNaN(id)) {
-        return res.status(400).json({ success: false, message: "Invalid ID format" });
-      }
-      const result = db.prepare("DELETE FROM milk_entries WHERE id = ?").run(id);
-      console.log(`[Delete Entry] ID: ${id}, Changes: ${result.changes}`);
-      if (result.changes === 0) {
-        return res.status(404).json({ success: false, message: "Entry not found" });
-      }
-      res.json({ success: true, changes: result.changes });
-    } catch (err) {
-      console.error('[Delete Entry] Error:', err);
-      res.status(500).json({ success: false, message: "Error deleting entry" });
-    }
-  });
-
-  // Advances
-  app.get("/api/advances", (req, res) => {
-    const customerId = req.query.customerId;
-    let query = `
-      SELECT a.*, c.name as customer_name 
-      FROM advances a 
-      JOIN customers c ON a.customer_id = c.id 
-    `;
-    let params = [];
-    if (customerId) {
-      query += ` WHERE a.customer_id = ? `;
-      params.push(customerId);
-    }
-    query += ` ORDER BY a.date DESC `;
-    
-    const advances = db.prepare(query).all(...params);
-    res.json(advances);
-  });
-
-  app.post("/api/advances", (req, res) => {
-    const { customer_id, date, amount, type = 'advance' } = req.body;
-    const result = db.prepare("INSERT INTO advances (customer_id, date, amount, type) VALUES (?, ?, ?, ?)").run(customer_id, date, amount, type);
-    res.json({ id: result.lastInsertRowid });
-  });
-
-  app.delete("/api/advances/:id", (req, res) => {
-    try {
-      const id = parseInt(req.params.id);
-      if (isNaN(id)) {
-        return res.status(400).json({ success: false, message: "Invalid ID format" });
-      }
-      
-      const result = db.prepare("DELETE FROM advances WHERE id = ?").run(id);
-      console.log(`[Delete Advance] ID: ${id}, Changes: ${result.changes}`);
-      
-      if (result.changes === 0) {
-        return res.status(404).json({ success: false, message: "Advance record not found or already deleted" });
-      }
-      
-      res.json({ success: true, changes: result.changes });
-    } catch (err) {
-      console.error('[Delete Advance] Error:', err);
-      res.status(500).json({ success: false, message: "Error deleting advance" });
-    }
-  });
-
-  // Feed Types
-  app.get("/api/feed-types", (req, res) => {
-    const types = db.prepare("SELECT * FROM feed_types ORDER BY name ASC").all();
-    res.json(types);
-  });
-
-  app.post("/api/feed-types", (req, res) => {
-    const { name, rate } = req.body;
-    const result = db.prepare("INSERT INTO feed_types (name, rate) VALUES (?, ?)").run(name, rate);
-    res.json({ id: result.lastInsertRowid });
-  });
-
-  app.put("/api/feed-types/:id", (req, res) => {
-    const { name, rate } = req.body;
-    db.prepare("UPDATE feed_types SET name = ?, rate = ? WHERE id = ?").run(name, rate, req.params.id);
+  app.delete("/api/entries/:id", async (req, res) => {
+    const id = parseInt(req.params.id);
+    if (isNaN(id)) return res.status(400).json({ success: false, message: "Invalid ID" });
+    const result = await db.execute({ sql: "DELETE FROM milk_entries WHERE id = ?", args: [id] });
+    if (result.rowsAffected === 0) return res.status(404).json({ success: false, message: "Entry not found" });
     res.json({ success: true });
   });
 
-  app.delete("/api/feed-types/:id", (req, res) => {
+  // ─── ADVANCES ───────────────────────────────────────────────────────────────
+  app.get("/api/advances", async (req, res) => {
+    const customerId = req.query.customerId;
+    let sql = `SELECT a.*, c.name as customer_name FROM advances a JOIN customers c ON a.customer_id = c.id`;
+    const args: any[] = [];
+    if (customerId) { sql += " WHERE a.customer_id = ?"; args.push(customerId); }
+    sql += " ORDER BY a.date DESC";
+    const result = await db.execute({ sql, args });
+    res.json(result.rows);
+  });
+
+  app.post("/api/advances", async (req, res) => {
+    const { customer_id, date, amount, type = "advance" } = req.body;
+    const result = await db.execute({
+      sql: "INSERT INTO advances (customer_id, date, amount, type) VALUES (?, ?, ?, ?)",
+      args: [customer_id, date, amount, type],
+    });
+    res.json({ id: result.lastInsertRowid });
+  });
+
+  app.delete("/api/advances/:id", async (req, res) => {
+    const id = parseInt(req.params.id);
+    if (isNaN(id)) return res.status(400).json({ success: false, message: "Invalid ID" });
+    const result = await db.execute({ sql: "DELETE FROM advances WHERE id = ?", args: [id] });
+    if (result.rowsAffected === 0) return res.status(404).json({ success: false, message: "Advance record not found" });
+    res.json({ success: true });
+  });
+
+  // ─── FEED TYPES ─────────────────────────────────────────────────────────────
+  app.get("/api/feed-types", async (_req, res) => {
+    const result = await db.execute("SELECT * FROM feed_types ORDER BY name ASC");
+    res.json(result.rows);
+  });
+
+  app.post("/api/feed-types", async (req, res) => {
+    const { name, rate } = req.body;
+    const result = await db.execute({ sql: "INSERT INTO feed_types (name, rate) VALUES (?, ?)", args: [name, rate] });
+    res.json({ id: result.lastInsertRowid });
+  });
+
+  app.put("/api/feed-types/:id", async (req, res) => {
+    const { name, rate } = req.body;
+    await db.execute({ sql: "UPDATE feed_types SET name = ?, rate = ? WHERE id = ?", args: [name, rate, req.params.id] });
+    res.json({ success: true });
+  });
+
+  app.delete("/api/feed-types/:id", async (req, res) => {
     try {
-      const result = db.prepare("DELETE FROM feed_types WHERE id = ?").run(req.params.id);
-      res.json({ success: true, changes: result.changes });
-    } catch (err) {
+      const result = await db.execute({ sql: "DELETE FROM feed_types WHERE id = ?", args: [req.params.id] });
+      res.json({ success: true, changes: result.rowsAffected });
+    } catch (_) {
       res.status(500).json({ success: false, message: "Error deleting feed type. It might be in use." });
     }
   });
 
-  // Feed Purchases
-  app.get("/api/feed-purchases", (req, res) => {
+  // ─── FEED PURCHASES ─────────────────────────────────────────────────────────
+  app.get("/api/feed-purchases", async (req, res) => {
     const customerId = req.query.customerId;
-    let query = `
-      SELECT p.*, c.name as customer_name, t.name as feed_name 
-      FROM feed_purchases p 
-      JOIN customers c ON p.customer_id = c.id 
-      JOIN feed_types t ON p.feed_type_id = t.id
-    `;
-    let params = [];
-    if (customerId) {
-      query += ` WHERE p.customer_id = ? `;
-      params.push(customerId);
-    }
-    query += ` ORDER BY p.date DESC `;
-    
-    const purchases = db.prepare(query).all(...params);
-    res.json(purchases);
+    let sql = `SELECT p.*, c.name as customer_name, t.name as feed_name
+               FROM feed_purchases p
+               JOIN customers c ON p.customer_id = c.id
+               JOIN feed_types t ON p.feed_type_id = t.id`;
+    const args: any[] = [];
+    if (customerId) { sql += " WHERE p.customer_id = ?"; args.push(customerId); }
+    sql += " ORDER BY p.date DESC";
+    const result = await db.execute({ sql, args });
+    res.json(result.rows);
   });
 
-  app.post("/api/feed-purchases", (req, res) => {
+  app.post("/api/feed-purchases", async (req, res) => {
     const { customer_id, feed_type_id, date, quantity } = req.body;
-    const feedType = db.prepare("SELECT rate FROM feed_types WHERE id = ?").get(feed_type_id);
-    if (!feedType) return res.status(404).json({ message: "Feed type not found" });
-    
-    const amount = quantity * feedType.rate;
-    const result = db.prepare("INSERT INTO feed_purchases (customer_id, feed_type_id, date, quantity, amount) VALUES (?, ?, ?, ?, ?)").run(customer_id, feed_type_id, date, quantity, amount);
+    const ft = await db.execute({ sql: "SELECT rate FROM feed_types WHERE id = ?", args: [feed_type_id] });
+    if (!ft.rows[0]) return res.status(404).json({ message: "Feed type not found" });
+    const amount = quantity * (ft.rows[0].rate as number);
+    const result = await db.execute({
+      sql: "INSERT INTO feed_purchases (customer_id, feed_type_id, date, quantity, amount) VALUES (?, ?, ?, ?, ?)",
+      args: [customer_id, feed_type_id, date, quantity, amount],
+    });
     res.json({ id: result.lastInsertRowid });
   });
 
-  app.delete("/api/feed-purchases/:id", (req, res) => {
-    try {
-      const id = parseInt(req.params.id);
-      if (isNaN(id)) {
-        return res.status(400).json({ success: false, message: "Invalid ID format" });
-      }
-      const result = db.prepare("DELETE FROM feed_purchases WHERE id = ?").run(id);
-      if (result.changes === 0) {
-        return res.status(404).json({ success: false, message: "Purchase record not found" });
-      }
-      res.json({ success: true, changes: result.changes });
-    } catch (err) {
-      res.status(500).json({ success: false, message: "Error deleting purchase record" });
-    }
+  app.delete("/api/feed-purchases/:id", async (req, res) => {
+    const id = parseInt(req.params.id);
+    if (isNaN(id)) return res.status(400).json({ success: false, message: "Invalid ID" });
+    const result = await db.execute({ sql: "DELETE FROM feed_purchases WHERE id = ?", args: [id] });
+    if (result.rowsAffected === 0) return res.status(404).json({ success: false, message: "Purchase record not found" });
+    res.json({ success: true });
   });
 
-  // Dashboard Stats
-  app.get("/api/stats", (req, res) => {
+  // ─── STATS ──────────────────────────────────────────────────────────────────
+  app.get("/api/stats", async (req, res) => {
     const customerId = req.query.customerId;
-    const today = new Date().toISOString().split('T')[0];
-    const currentMonth = today.substring(0, 7); // YYYY-MM
+    const today = new Date().toISOString().split("T")[0];
+    const currentMonth = today.substring(0, 7);
 
     if (customerId) {
-      const todayAM = db.prepare("SELECT SUM(liters) as total FROM milk_entries WHERE date = ? AND shift = 'AM' AND customer_id = ?").get(today, customerId).total || 0;
-      const todayPM = db.prepare("SELECT SUM(liters) as total FROM milk_entries WHERE date = ? AND shift = 'PM' AND customer_id = ?").get(today, customerId).total || 0;
-      const todaySupply = todayAM + todayPM;
-      const monthlyRevenue = db.prepare("SELECT SUM(amount) as total FROM milk_entries WHERE date LIKE ? AND customer_id = ?").get(`${currentMonth}%`, customerId).total || 0;
-      const monthlyAdvances = db.prepare("SELECT SUM(amount) as total FROM advances WHERE date LIKE ? AND type = 'advance' AND customer_id = ?").get(`${currentMonth}%`, customerId).total || 0;
-      const monthlyDeductions = db.prepare("SELECT SUM(amount) as total FROM advances WHERE date LIKE ? AND type = 'deduction' AND customer_id = ?").get(`${currentMonth}%`, customerId).total || 0;
-      const monthlyFeed = db.prepare("SELECT SUM(amount) as total FROM feed_purchases WHERE date LIKE ? AND customer_id = ?").get(`${currentMonth}%`, customerId).total || 0;
-      
-      // Running Balance
-      const totalBorrowed = db.prepare("SELECT SUM(amount) as total FROM advances WHERE customer_id = ? AND type = 'advance'").get(customerId).total || 0;
-      const totalRepaid = db.prepare("SELECT SUM(amount) as total FROM advances WHERE customer_id = ? AND type = 'deduction'").get(customerId).total || 0;
-      const advanceBalance = totalBorrowed - totalRepaid;
-
-      const pendingPayments = Math.max(0, monthlyRevenue - monthlyDeductions - monthlyFeed);
-
+      const [amR, pmR, revR, advR, dedR, feedR, borrR, repR] = await Promise.all([
+        db.execute({ sql: "SELECT SUM(liters) as total FROM milk_entries WHERE date = ? AND shift = 'AM' AND customer_id = ?", args: [today, customerId] }),
+        db.execute({ sql: "SELECT SUM(liters) as total FROM milk_entries WHERE date = ? AND shift = 'PM' AND customer_id = ?", args: [today, customerId] }),
+        db.execute({ sql: "SELECT SUM(amount) as total FROM milk_entries WHERE date LIKE ? AND customer_id = ?", args: [`${currentMonth}%`, customerId] }),
+        db.execute({ sql: "SELECT SUM(amount) as total FROM advances WHERE date LIKE ? AND type = 'advance' AND customer_id = ?", args: [`${currentMonth}%`, customerId] }),
+        db.execute({ sql: "SELECT SUM(amount) as total FROM advances WHERE date LIKE ? AND type = 'deduction' AND customer_id = ?", args: [`${currentMonth}%`, customerId] }),
+        db.execute({ sql: "SELECT SUM(amount) as total FROM feed_purchases WHERE date LIKE ? AND customer_id = ?", args: [`${currentMonth}%`, customerId] }),
+        db.execute({ sql: "SELECT SUM(amount) as total FROM advances WHERE customer_id = ? AND type = 'advance'", args: [customerId] }),
+        db.execute({ sql: "SELECT SUM(amount) as total FROM advances WHERE customer_id = ? AND type = 'deduction'", args: [customerId] }),
+      ]);
+      const todayAM = (amR.rows[0]?.total as number) || 0;
+      const todayPM = (pmR.rows[0]?.total as number) || 0;
+      const monthlyRevenue = (revR.rows[0]?.total as number) || 0;
+      const monthlyAdvances = (advR.rows[0]?.total as number) || 0;
+      const monthlyDeductions = (dedR.rows[0]?.total as number) || 0;
+      const monthlyFeed = (feedR.rows[0]?.total as number) || 0;
+      const advanceBalance = ((borrR.rows[0]?.total as number) || 0) - ((repR.rows[0]?.total as number) || 0);
       return res.json({
-        todaySupply,
-        todayAM,
-        todayPM,
-        monthlyRevenue,
-        monthlyAdvances,
-        monthlyDeductions,
-        monthlyFeed,
-        advanceBalance,
-        pendingPayments
+        todaySupply: todayAM + todayPM, todayAM, todayPM,
+        monthlyRevenue, monthlyAdvances, monthlyDeductions, monthlyFeed,
+        advanceBalance, pendingPayments: Math.max(0, monthlyRevenue - monthlyDeductions - monthlyFeed),
       });
     }
 
-    const totalCustomers = db.prepare("SELECT COUNT(*) as count FROM customers").get().count;
-    const todayAM = db.prepare("SELECT SUM(liters) as total FROM milk_entries WHERE date = ? AND shift = 'AM'").get(today).total || 0;
-    const todayPM = db.prepare("SELECT SUM(liters) as total FROM milk_entries WHERE date = ? AND shift = 'PM'").get(today).total || 0;
-    const todaySupply = todayAM + todayPM;
-    const monthlyRevenue = db.prepare("SELECT SUM(amount) as total FROM milk_entries WHERE date LIKE ?").get(`${currentMonth}%`).total || 0;
-    const monthlyAdvances = db.prepare("SELECT SUM(amount) as total FROM advances WHERE date LIKE ? AND type = 'advance'").get(`${currentMonth}%`).total || 0;
-    const monthlyDeductions = db.prepare("SELECT SUM(amount) as total FROM advances WHERE date LIKE ? AND type = 'deduction'").get(`${currentMonth}%`).total || 0;
-    const monthlyFeed = db.prepare("SELECT SUM(amount) as total FROM feed_purchases WHERE date LIKE ?").get(`${currentMonth}%`).total || 0;
-    const pendingPayments = Math.max(0, monthlyRevenue - monthlyDeductions - monthlyFeed);
-
-    const totalBorrowed = db.prepare("SELECT SUM(amount) as total FROM advances WHERE type = 'advance'").get().total || 0;
-    const totalRepaid = db.prepare("SELECT SUM(amount) as total FROM advances WHERE type = 'deduction'").get().total || 0;
-    const totalAdvanceBalance = totalBorrowed - totalRepaid;
-
+    const [custR, amR, pmR, revR, advR, dedR, feedR, borrR, repR] = await Promise.all([
+      db.execute("SELECT COUNT(*) as count FROM customers"),
+      db.execute({ sql: "SELECT SUM(liters) as total FROM milk_entries WHERE date = ? AND shift = 'AM'", args: [today] }),
+      db.execute({ sql: "SELECT SUM(liters) as total FROM milk_entries WHERE date = ? AND shift = 'PM'", args: [today] }),
+      db.execute({ sql: "SELECT SUM(amount) as total FROM milk_entries WHERE date LIKE ?", args: [`${currentMonth}%`] }),
+      db.execute({ sql: "SELECT SUM(amount) as total FROM advances WHERE date LIKE ? AND type = 'advance'", args: [`${currentMonth}%`] }),
+      db.execute({ sql: "SELECT SUM(amount) as total FROM advances WHERE date LIKE ? AND type = 'deduction'", args: [`${currentMonth}%`] }),
+      db.execute({ sql: "SELECT SUM(amount) as total FROM feed_purchases WHERE date LIKE ?", args: [`${currentMonth}%`] }),
+      db.execute("SELECT SUM(amount) as total FROM advances WHERE type = 'advance'"),
+      db.execute("SELECT SUM(amount) as total FROM advances WHERE type = 'deduction'"),
+    ]);
+    const todayAM = (amR.rows[0]?.total as number) || 0;
+    const todayPM = (pmR.rows[0]?.total as number) || 0;
+    const monthlyRevenue = (revR.rows[0]?.total as number) || 0;
+    const monthlyDeductions = (dedR.rows[0]?.total as number) || 0;
+    const monthlyFeed = (feedR.rows[0]?.total as number) || 0;
     res.json({
-      totalCustomers,
-      todaySupply,
-      todayAM,
-      todayPM,
+      totalCustomers: (custR.rows[0]?.count as number) || 0,
+      todaySupply: todayAM + todayPM, todayAM, todayPM,
       monthlyRevenue,
-      monthlyAdvances,
-      monthlyDeductions,
-      monthlyFeed,
-      totalAdvanceBalance,
-      pendingPayments
+      monthlyAdvances: (advR.rows[0]?.total as number) || 0,
+      monthlyDeductions, monthlyFeed,
+      totalAdvanceBalance: ((borrR.rows[0]?.total as number) || 0) - ((repR.rows[0]?.total as number) || 0),
+      pendingPayments: Math.max(0, monthlyRevenue - monthlyDeductions - monthlyFeed),
     });
   });
 
-  // Billing
-  app.get("/api/billing/:month", (req, res) => {
-    const month = req.params.month; // YYYY-MM
-    const billing = db.prepare(`
-      SELECT 
-        c.id as customer_id,
-        c.name,
-        COALESCE(SUM(e.liters), 0) as total_liters,
-        COALESCE(SUM(e.amount), 0) as total_amount,
-        COALESCE((SELECT SUM(amount) FROM advances WHERE customer_id = c.id AND date LIKE ? AND type = 'advance'), 0) as total_advance,
-        COALESCE((SELECT SUM(amount) FROM advances WHERE customer_id = c.id AND date LIKE ? AND type = 'deduction'), 0) as total_deduction,
-        COALESCE((SELECT SUM(amount) FROM feed_purchases WHERE customer_id = c.id AND date LIKE ?), 0) as total_feed,
-        (
-          COALESCE((SELECT SUM(amount) FROM advances WHERE customer_id = c.id AND type = 'advance'), 0) -
-          COALESCE((SELECT SUM(amount) FROM advances WHERE customer_id = c.id AND type = 'deduction'), 0)
-        ) as advance_balance
-      FROM customers c
-      LEFT JOIN milk_entries e ON c.id = e.customer_id AND e.date LIKE ?
-      GROUP BY c.id
-    `).all(`${month}%`, `${month}%`, `${month}%`, `${month}%`);
-
-    const processedBilling = billing.map(b => ({
+  // ─── BILLING ────────────────────────────────────────────────────────────────
+  app.get("/api/billing/:month", async (req, res) => {
+    const month = req.params.month;
+    const result = await db.execute({
+      sql: `SELECT
+              c.id as customer_id, c.name,
+              COALESCE(SUM(e.liters), 0) as total_liters,
+              COALESCE(SUM(e.amount), 0) as total_amount,
+              COALESCE((SELECT SUM(amount) FROM advances WHERE customer_id = c.id AND date LIKE ? AND type = 'advance'), 0) as total_advance,
+              COALESCE((SELECT SUM(amount) FROM advances WHERE customer_id = c.id AND date LIKE ? AND type = 'deduction'), 0) as total_deduction,
+              COALESCE((SELECT SUM(amount) FROM feed_purchases WHERE customer_id = c.id AND date LIKE ?), 0) as total_feed,
+              (COALESCE((SELECT SUM(amount) FROM advances WHERE customer_id = c.id AND type = 'advance'), 0) -
+               COALESCE((SELECT SUM(amount) FROM advances WHERE customer_id = c.id AND type = 'deduction'), 0)) as advance_balance
+            FROM customers c
+            LEFT JOIN milk_entries e ON c.id = e.customer_id AND e.date LIKE ?
+            GROUP BY c.id`,
+      args: [`${month}%`, `${month}%`, `${month}%`, `${month}%`],
+    });
+    const processedBilling = result.rows.map((b: any) => ({
       ...b,
-      // ONLY subtract bill reductions (deductions) and feed, NOT cash advances
-      final_payable: Math.max(0, b.total_amount - b.total_deduction - b.total_feed)
+      final_payable: Math.max(0, b.total_amount - b.total_deduction - b.total_feed),
     }));
-
     res.json(processedBilling);
   });
 
-  app.get("/api/billing/:month/:customerId", (req, res) => {
+  app.get("/api/billing/:month/:customerId", async (req, res) => {
     const { month, customerId } = req.params;
-    
-    // Get customer info
-    const customer = db.prepare("SELECT * FROM customers WHERE id = ?").get(customerId);
-    if (!customer) return res.status(404).json({ message: "Customer not found" });
+    const custR = await db.execute({ sql: "SELECT * FROM customers WHERE id = ?", args: [customerId] });
+    if (!custR.rows[0]) return res.status(404).json({ message: "Customer not found" });
 
-    // Get milk entries for the month
-    const milkEntries = db.prepare(`
-      SELECT date, shift, liters, amount 
-      FROM milk_entries 
-      WHERE customer_id = ? AND date LIKE ? 
-      ORDER BY date ASC, shift ASC
-    `).all(customerId, `${month}%`);
-
-    // Get advances for the month
-    const advances = db.prepare(`
-      SELECT date, amount, type 
-      FROM advances 
-      WHERE customer_id = ? AND date LIKE ? 
-      ORDER BY date ASC
-    `).all(customerId, `${month}%`);
-
-    // Get feed purchases for the month
-    const feedPurchases = db.prepare(`
-      SELECT p.date, p.quantity, p.amount, t.name as feed_name
-      FROM feed_purchases p
-      JOIN feed_types t ON p.feed_type_id = t.id
-      WHERE p.customer_id = ? AND p.date LIKE ?
-      ORDER BY p.date ASC
-    `).all(customerId, `${month}%`);
-
-    const totalBorrowed = db.prepare("SELECT SUM(amount) as total FROM advances WHERE customer_id = ? AND type = 'advance'").get(customerId).total || 0;
-    const totalRepaid = db.prepare("SELECT SUM(amount) as total FROM advances WHERE customer_id = ? AND type = 'deduction'").get(customerId).total || 0;
-    const advanceBalance = totalBorrowed - totalRepaid;
+    const [milkR, advR, feedR, borrR, repR] = await Promise.all([
+      db.execute({ sql: "SELECT date, shift, liters, amount FROM milk_entries WHERE customer_id = ? AND date LIKE ? ORDER BY date ASC, shift ASC", args: [customerId, `${month}%`] }),
+      db.execute({ sql: "SELECT date, amount, type FROM advances WHERE customer_id = ? AND date LIKE ? ORDER BY date ASC", args: [customerId, `${month}%`] }),
+      db.execute({ sql: "SELECT p.date, p.quantity, p.amount, t.name as feed_name FROM feed_purchases p JOIN feed_types t ON p.feed_type_id = t.id WHERE p.customer_id = ? AND p.date LIKE ? ORDER BY p.date ASC", args: [customerId, `${month}%`] }),
+      db.execute({ sql: "SELECT SUM(amount) as total FROM advances WHERE customer_id = ? AND type = 'advance'", args: [customerId] }),
+      db.execute({ sql: "SELECT SUM(amount) as total FROM advances WHERE customer_id = ? AND type = 'deduction'", args: [customerId] }),
+    ]);
 
     res.json({
-      customer,
-      milkEntries,
-      advances,
-      feedPurchases,
-      advanceBalance
+      customer: custR.rows[0],
+      milkEntries: milkR.rows,
+      advances: advR.rows,
+      feedPurchases: feedR.rows,
+      advanceBalance: ((borrR.rows[0]?.total as number) || 0) - ((repR.rows[0]?.total as number) || 0),
     });
   });
 
-  // --- Vite Integration ---
-
+  // ─── Vite Integration ────────────────────────────────────────────────────────
   if (process.env.NODE_ENV !== "production") {
-    const vite = await createViteServer({
-      server: { middlewareMode: true },
-      appType: "spa",
-    });
+    const vite = await createViteServer({ server: { middlewareMode: true }, appType: "spa" });
     app.use(vite.middlewares);
   } else {
     app.use(express.static(path.join(__dirname, "dist")));
-    app.get("*", (req, res) => {
-      res.sendFile(path.join(__dirname, "dist", "index.html"));
-    });
+    app.get("*", (_req, res) => res.sendFile(path.join(__dirname, "dist", "index.html")));
   }
 
   app.listen(PORT, "0.0.0.0", () => {
-    console.log(`Server running on http://localhost:${PORT}`);
+    console.log(`✅ Server running on http://localhost:${PORT}`);
     const adminPass = (process.env.ADMIN_PASSWORD || "admin123").trim();
-    const adminUser = (process.env.ADMIN_USERNAME || "admin").trim();
-    if (adminPass === "admin123" && adminUser === "admin") {
-      console.log('--- DEFAULT CREDENTIALS ---');
-      console.log('User: admin');
-      console.log('Pass: admin123');
-      console.log('---------------------------');
+    if (adminPass === "admin123") {
+      console.log("⚠️  WARNING: Using default credentials! Change ADMIN_PASSWORD in env vars.");
     }
   });
 }
 
-startServer();
+startServer().catch(console.error);
