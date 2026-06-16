@@ -72,7 +72,27 @@ export default function MilkEntries({ customerId, isAdmin = true, defaultRate }:
     }
 
     setIsModalOpen(false);
+    
+    // Optimistically add the new entry immediately to the local UI state
+    const customer = customers.find(c => c.id.toString() === formData.customer_id);
+    const customerName = customer ? customer.name : '';
+    
+    const newEntry: MilkEntry = {
+      id: data.id || Date.now().toString(),
+      customer_id: formData.customer_id,
+      customer_name: customerName,
+      date: formData.date,
+      shift: formData.shift,
+      liters: parseFloat(formData.liters),
+      rate: currentRate,
+      amount: parseFloat(formData.liters) * currentRate,
+      created_at: new Date().toISOString()
+    };
+
+    setEntries(prev => [newEntry, ...prev]);
     setFormData({ ...formData, customer_id: customerId ? customerId.toString() : '', liters: '' });
+    
+    // Sync with server in background
     fetchEntries();
   };
 
@@ -80,17 +100,26 @@ export default function MilkEntries({ customerId, isAdmin = true, defaultRate }:
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
   const handleDelete = async (id: string) => {
+    const previousEntries = [...entries];
+    // Optimistically remove from state immediately
+    setEntries(prev => prev.filter(entry => entry.id !== id));
+    
     setDeletingId(id);
     setShowConfirmModal(null);
     try {
       const response = await fetch(`/api/entries/${id}`, { method: 'DELETE' });
       if (response.ok) {
+        // Sync with server in background
         fetchEntries();
       } else {
+        // Rollback state if deletion failed
+        setEntries(previousEntries);
         const data = await response.json();
         alert(data.message || 'Failed to delete entry');
       }
     } catch (err) {
+      // Rollback state on connection error
+      setEntries(previousEntries);
       alert('Error connecting to server');
     } finally {
       setDeletingId(null);

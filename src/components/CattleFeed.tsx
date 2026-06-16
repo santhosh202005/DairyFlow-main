@@ -73,7 +73,7 @@ export default function CattleFeed({ customerId, isAdmin = true }: CattleFeedPro
 
   const handlePurchaseSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    await fetch('/api/feed-purchases', {
+    const response = await fetch('/api/feed-purchases', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -83,6 +83,31 @@ export default function CattleFeed({ customerId, isAdmin = true }: CattleFeedPro
         quantity: parseFloat(purchaseFormData.quantity)
       })
     });
+
+    if (response.ok) {
+      const data = await response.json();
+      
+      const customer = customers.find(c => c.id.toString() === purchaseFormData.customer_id);
+      const customerName = customer ? customer.name : '';
+      
+      const feedType = feedTypes.find(t => t.id.toString() === purchaseFormData.feed_type_id);
+      const feedName = feedType ? feedType.name : '';
+      const rate = feedType ? feedType.rate : 0;
+      
+      const newPurchase: FeedPurchase = {
+        id: data.id || Date.now().toString(),
+        customer_id: purchaseFormData.customer_id,
+        customer_name: customerName,
+        feed_type_id: purchaseFormData.feed_type_id,
+        feed_name: feedName,
+        date: purchaseFormData.date,
+        quantity: parseFloat(purchaseFormData.quantity),
+        amount: parseFloat(purchaseFormData.quantity) * rate,
+        created_at: new Date().toISOString()
+      };
+
+      setPurchases(prev => [newPurchase, ...prev]);
+    }
 
     setIsPurchaseModalOpen(false);
     setPurchaseFormData({ ...purchaseFormData, quantity: '' });
@@ -106,15 +131,19 @@ export default function CattleFeed({ customerId, isAdmin = true }: CattleFeedPro
 
   const handleDeletePurchase = async (id: string) => {
     if (!window.confirm('Delete this purchase record?')) return;
+    const previousPurchases = [...purchases];
+    setPurchases(prev => prev.filter(p => p.id !== id));
     try {
       const response = await fetch(`/api/feed-purchases/${id}`, { method: 'DELETE' });
       if (response.ok) {
         fetchPurchases();
       } else {
+        setPurchases(previousPurchases);
         const data = await response.json();
         alert(data.message || 'Failed to delete purchase');
       }
     } catch (err) {
+      setPurchases(previousPurchases);
       alert('Error connecting to server');
     }
   };

@@ -4,6 +4,7 @@ import { createServer as createViteServer } from "vite";
 import { createClient } from "@libsql/client";
 import path from "path";
 import { fileURLToPath } from "url";
+import fs from "fs";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -11,13 +12,47 @@ const __dirname = path.dirname(__filename);
 // ─── Turso / libSQL Client ───────────────────────────────────────────────────
 // For local dev: set TURSO_DB_URL=file:dairy.db  (no token needed)
 // For production: set TURSO_DB_URL and TURSO_DB_AUTH_TOKEN from turso.tech
-const db = createClient({
-  url: process.env.TURSO_DB_URL || "file:dairy.db",
-  authToken: process.env.TURSO_DB_AUTH_TOKEN,
-});
+const isRemote = process.env.TURSO_DB_URL && (process.env.TURSO_DB_URL.startsWith("libsql://") || process.env.TURSO_DB_URL.startsWith("https://"));
+
+const dbConfig: any = {};
+
+if (isRemote) {
+  // Use Embedded Replica in production (e.g. Render)
+  // Ensure the local folder path exists
+  if (process.env.DB_PATH) {
+    const dir = path.dirname(process.env.DB_PATH);
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
+    }
+  }
+
+  const localPath = process.env.DB_PATH ? `file:${process.env.DB_PATH}` : "file:dairy.db";
+  dbConfig.url = localPath;
+  dbConfig.syncUrl = process.env.TURSO_DB_URL;
+  dbConfig.authToken = process.env.TURSO_DB_AUTH_TOKEN;
+  dbConfig.syncInterval = 60000; // sync automatically every 60 seconds
+  console.log(`[Database] Initializing Turso Embedded Replica. Local path: ${localPath}, Syncing with: ${dbConfig.syncUrl}`);
+} else {
+  // Local development / local SQLite file
+  dbConfig.url = process.env.TURSO_DB_URL || "file:dairy.db";
+  console.log(`[Database] Initializing Local SQLite database: ${dbConfig.url}`);
+}
+
+const db = createClient(dbConfig);
 
 // ─── Initialize Database ─────────────────────────────────────────────────────
 async function initDB() {
+  // If we are using embedded replica, synchronize schema changes and initial data before running migrations
+  if (isRemote && typeof db.sync === "function") {
+    try {
+      console.log("[Database] Performing initial sync before running migrations...");
+      await db.sync();
+      console.log("[Database] Initial sync completed.");
+    } catch (syncError) {
+      console.error("[Database] Initial sync failed, continuing anyway:", syncError);
+    }
+  }
+
   // Migrations
   try { await db.execute("ALTER TABLE advances ADD COLUMN type TEXT NOT NULL DEFAULT 'advance'"); } catch (_) {}
   try { await db.execute("ALTER TABLE customers ADD COLUMN default_rate REAL DEFAULT 30"); } catch (_) {}
@@ -76,7 +111,27 @@ async function initDB() {
       FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE CASCADE,
       FOREIGN KEY (feed_type_id) REFERENCES feed_types(id)
     );
+
+    -- Speed up customer lookups by phone and sort by name
+    CREATE INDEX IF NOT EXISTS idx_customers_phone ON customers(phone);
+    CREATE INDEX IF NOT EXISTS idx_customers_name ON customers(name);
+
+    -- Speed up filtering and joining by customer_id
+    CREATE INDEX IF NOT EXISTS idx_advances_customer_id ON advances(customer_id);
+    CREATE INDEX IF NOT EXISTS idx_feed_purchases_customer_id ON feed_purchases(customer_id);
+
+    -- Speed up filtering by date
+    CREATE INDEX IF NOT EXISTS idx_milk_entries_date ON milk_entries(date);
+    CREATE INDEX IF NOT EXISTS idx_advances_date ON advances(date);
+    CREATE INDEX IF NOT EXISTS idx_feed_purchases_date ON feed_purchases(date);
   `);
+
+  // Sync again after DDL setup to ensure the local replica has all schemas up-to-date
+  if (isRemote && typeof db.sync === "function") {
+    try {
+      await db.sync();
+    } catch (_) {}
+  }
 }
 
 async function startServer() {
@@ -85,6 +140,19 @@ async function startServer() {
   const app = express();
   const PORT = parseInt(process.env.PORT || "3000");
   app.use(express.json());
+
+  // ─── Health Check (keeps Render free tier alive) ───────────────────────────
+  app.get("/api/health", (_req, res) => {
+    res.json({ status: "ok", timestamp: new Date().toISOString() });
+  });
+
+  // Self-ping to prevent Render from sleeping (every 14 minutes)
+  if (process.env.NODE_ENV === "production" && process.env.RENDER_EXTERNAL_URL) {
+    setInterval(() => {
+      fetch(`${process.env.RENDER_EXTERNAL_URL}/api/health`).catch(() => {});
+    }, 14 * 60 * 1000);
+  }
+
 
   // ─── PWA / TWA ─────────────────────────────────────────────────────────────
   app.get("/.well-known/assetlinks.json", (_req, res) => {
@@ -189,7 +257,7 @@ async function startServer() {
       sql: "INSERT INTO customers (name, phone, address, username, password, default_rate) VALUES (?, ?, ?, ?, ?, ?)",
       args: [name, phone, address, username || null, password || null, default_rate],
     });
-    res.json({ id: result.lastInsertRowid });
+    res.json({ id: result.lastInsertRowid !== undefined ? Number(result.lastInsertRowid) : null });
   });
 
   app.put("/api/customers/:id", async (req, res) => {
@@ -208,7 +276,7 @@ async function startServer() {
 
   // ─── MILK ENTRIES ───────────────────────────────────────────────────────────
   app.get("/api/entries", async (req, res) => {
-    const customerId = req.query.customerId;
+    const customerId = typeof req.query.customerId === "string" ? req.query.customerId : undefined;
     let sql = `SELECT e.*, c.name as customer_name FROM milk_entries e JOIN customers c ON e.customer_id = c.id`;
     const args: any[] = [];
     if (customerId) { sql += " WHERE e.customer_id = ?"; args.push(customerId); }
@@ -230,7 +298,7 @@ async function startServer() {
         sql: "INSERT INTO milk_entries (customer_id, date, shift, liters, rate, amount) VALUES (?, ?, ?, ?, ?, ?)",
         args: [customer_id, date, shift || "AM", liters, rate, amount],
       });
-      res.json({ id: result.lastInsertRowid });
+      res.json({ id: result.lastInsertRowid !== undefined ? Number(result.lastInsertRowid) : null });
     } catch (err: any) {
       if (err.message?.includes("UNIQUE")) return res.status(400).json({ success: false, message: `Entry already exists for ${shift} on ${date}` });
       res.status(500).json({ success: false, message: "Server error" });
@@ -247,7 +315,7 @@ async function startServer() {
 
   // ─── ADVANCES ───────────────────────────────────────────────────────────────
   app.get("/api/advances", async (req, res) => {
-    const customerId = req.query.customerId;
+    const customerId = typeof req.query.customerId === "string" ? req.query.customerId : undefined;
     let sql = `SELECT a.*, c.name as customer_name FROM advances a JOIN customers c ON a.customer_id = c.id`;
     const args: any[] = [];
     if (customerId) { sql += " WHERE a.customer_id = ?"; args.push(customerId); }
@@ -262,7 +330,7 @@ async function startServer() {
       sql: "INSERT INTO advances (customer_id, date, amount, type) VALUES (?, ?, ?, ?)",
       args: [customer_id, date, amount, type],
     });
-    res.json({ id: result.lastInsertRowid });
+    res.json({ id: result.lastInsertRowid !== undefined ? Number(result.lastInsertRowid) : null });
   });
 
   app.delete("/api/advances/:id", async (req, res) => {
@@ -282,7 +350,7 @@ async function startServer() {
   app.post("/api/feed-types", async (req, res) => {
     const { name, rate } = req.body;
     const result = await db.execute({ sql: "INSERT INTO feed_types (name, rate) VALUES (?, ?)", args: [name, rate] });
-    res.json({ id: result.lastInsertRowid });
+    res.json({ id: result.lastInsertRowid !== undefined ? Number(result.lastInsertRowid) : null });
   });
 
   app.put("/api/feed-types/:id", async (req, res) => {
@@ -302,7 +370,7 @@ async function startServer() {
 
   // ─── FEED PURCHASES ─────────────────────────────────────────────────────────
   app.get("/api/feed-purchases", async (req, res) => {
-    const customerId = req.query.customerId;
+    const customerId = typeof req.query.customerId === "string" ? req.query.customerId : undefined;
     let sql = `SELECT p.*, c.name as customer_name, t.name as feed_name
                FROM feed_purchases p
                JOIN customers c ON p.customer_id = c.id
@@ -323,7 +391,7 @@ async function startServer() {
       sql: "INSERT INTO feed_purchases (customer_id, feed_type_id, date, quantity, amount) VALUES (?, ?, ?, ?, ?)",
       args: [customer_id, feed_type_id, date, quantity, amount],
     });
-    res.json({ id: result.lastInsertRowid });
+    res.json({ id: result.lastInsertRowid !== undefined ? Number(result.lastInsertRowid) : null });
   });
 
   app.delete("/api/feed-purchases/:id", async (req, res) => {
@@ -336,7 +404,7 @@ async function startServer() {
 
   // ─── STATS ──────────────────────────────────────────────────────────────────
   app.get("/api/stats", async (req, res) => {
-    const customerId = req.query.customerId;
+    const customerId = typeof req.query.customerId === "string" ? req.query.customerId : undefined;
     const today = new Date().toISOString().split("T")[0];
     const currentMonth = today.substring(0, 7);
 

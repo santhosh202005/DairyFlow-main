@@ -71,7 +71,7 @@ export default function Advances({ customerId, isAdmin = true }: AdvancesProps) 
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    await fetch('/api/advances', {
+    const response = await fetch('/api/advances', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -80,6 +80,35 @@ export default function Advances({ customerId, isAdmin = true }: AdvancesProps) 
         amount: parseFloat(formData.amount)
       })
     });
+
+    if (response.ok) {
+      const data = await response.json();
+      
+      const customer = customers.find(c => c.id.toString() === formData.customer_id);
+      const customerName = customer ? customer.name : '';
+      
+      const newAdvance: Advance = {
+        id: data.id || Date.now().toString(),
+        customer_id: formData.customer_id,
+        customer_name: customerName,
+        date: formData.date,
+        amount: parseFloat(formData.amount),
+        type: formData.type as 'advance' | 'deduction',
+        created_at: new Date().toISOString()
+      };
+
+      setAdvances(prev => [newAdvance, ...prev]);
+      
+      if (isAdmin) {
+        fetch('/api/stats')
+          .then(res => res.json())
+          .then(d => setGlobalStats(d));
+      } else if (customerId) {
+        fetch(`/api/stats?customerId=${customerId}`)
+          .then(res => res.json())
+          .then(d => setGlobalStats(d));
+      }
+    }
 
     setIsModalOpen(false);
     setFormData({ ...formData, customer_id: customerId ? customerId.toString() : '', amount: '' });
@@ -90,6 +119,9 @@ export default function Advances({ customerId, isAdmin = true }: AdvancesProps) 
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
   const handleDelete = async (id: string) => {
+    const previousAdvances = [...advances];
+    setAdvances(prev => prev.filter(a => a.id !== id));
+    
     setDeletingId(id);
     setShowConfirmModal(null);
     try {
@@ -108,9 +140,11 @@ export default function Advances({ customerId, isAdmin = true }: AdvancesProps) 
             .then(d => setGlobalStats(d));
         }
       } else {
+        setAdvances(previousAdvances);
         alert(data.message || 'Could not delete record.');
       }
     } catch (err) {
+      setAdvances(previousAdvances);
       alert('Error connecting to server.');
     } finally {
       setDeletingId(null);
