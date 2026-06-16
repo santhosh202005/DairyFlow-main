@@ -245,6 +245,33 @@ async function startServer() {
     });
   });
 
+  app.post("/api/reset-password", async (req, res) => {
+    const { phone, otp, newPassword } = req.body;
+    if (!phone || !otp || !newPassword) {
+      return res.status(400).json({ success: false, message: "Phone number, OTP, and new password are required" });
+    }
+
+    const stored = otpStore.get(phone);
+    if (!stored || stored.otp !== otp || stored.expiresAt < Date.now()) {
+      return res.status(400).json({ success: false, message: "Invalid or expired OTP" });
+    }
+    otpStore.delete(phone);
+
+    try {
+      const result = await db.execute({
+        sql: "UPDATE customers SET password = ? WHERE phone = ?",
+        args: [newPassword, phone],
+      });
+      if (result.rowsAffected === 0) {
+        return res.status(404).json({ success: false, message: "No customer found with this phone number" });
+      }
+      res.json({ success: true, message: "Password reset successfully" });
+    } catch (err) {
+      console.error("[ResetPassword] DB error:", err);
+      res.status(500).json({ success: false, message: "Server error" });
+    }
+  });
+
   // ─── CUSTOMERS ──────────────────────────────────────────────────────────────
   app.get("/api/customers", async (_req, res) => {
     const result = await db.execute("SELECT * FROM customers ORDER BY name ASC");
