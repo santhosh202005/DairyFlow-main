@@ -23,6 +23,20 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import Dashboard from './components/Dashboard';
+
+function useIsMobile(query = '(max-width: 768px)') {
+  const [isMobile, setIsMobile] = useState(false);
+  useEffect(() => {
+    const mql = window.matchMedia?.(query);
+    if (!mql) return;
+    const onChange = () => setIsMobile(!!mql.matches);
+    onChange();
+    mql.addEventListener?.('change', onChange);
+    return () => mql.removeEventListener?.('change', onChange);
+  }, [query]);
+  return isMobile;
+}
+
 import Customers from './components/Customers';
 import MilkEntries from './components/MilkEntries';
 import Advances from './components/Advances';
@@ -107,12 +121,14 @@ export default function App() {
     { id: 'about', label: 'About', icon: Info },
   ];
 
+  const isMobile = useIsMobile();
+
   return (
     <div className="min-h-screen bg-[#F9FAFB] flex font-sans text-slate-900">
-      {/* Sidebar */}
+      {/* Sidebar — desktop only */}
       <aside 
-        className={`bg-white border-r border-slate-200 transition-all duration-500 ease-in-out flex flex-col relative z-20 ${
-          isSidebarOpen ? 'w-72' : 'w-24'
+        className={`bg-white border-r border-slate-200 transition-all duration-500 ease-in-out flex-col relative z-20 ${
+          isMobile ? 'hidden' : (isSidebarOpen ? 'w-72 flex' : 'w-24 flex')
         }`}
       >
         <div className="p-8 flex items-center gap-4 border-b border-slate-50">
@@ -184,9 +200,9 @@ export default function App() {
       </aside>
 
       {/* Main Content */}
-      <main className="flex-1 overflow-auto relative glass-card">
-        <header className="bg-white/90 backdrop-blur-xl border-b border-slate-100 px-10 py-6 sticky top-0 z-30 flex justify-between items-center shadow-soft">
-          <h1 className="text-3xl font-display font-bold text-slate-900 tracking-tight capitalize">
+      <main className="flex-1 overflow-auto relative glass-card flex flex-col">
+        <header className="bg-white/90 backdrop-blur-xl border-b border-slate-100 px-4 py-4 md:px-10 md:py-6 sticky top-0 z-30 flex justify-between items-center shadow-soft">
+          <h1 className="text-xl md:text-3xl font-display font-bold text-slate-900 tracking-tight capitalize">
             {activeView.replace('-', ' ')}
           </h1>
           
@@ -278,7 +294,7 @@ export default function App() {
           </div>
         </header>
 
-        <div className="p-10 max-w-7xl mx-auto">
+        <div className="p-4 md:p-10 max-w-7xl mx-auto flex-1 pb-24 md:pb-10">
           <AnimatePresence mode="wait">
             <motion.div
               key={activeView}
@@ -302,6 +318,47 @@ export default function App() {
           </AnimatePresence>
         </div>
       </main>
+
+      {/* Mobile Bottom Navigation */}
+      {isMobile && (
+        <nav className="fixed bottom-0 left-0 right-0 z-50 bg-white/95 backdrop-blur-xl border-t border-slate-100 shadow-[0_-4px_24px_rgba(0,0,0,0.06)] safe-area-inset-bottom">
+          <div className="flex items-stretch overflow-x-auto">
+            {navItems.map((item) => {
+              const Icon = item.icon;
+              const isActive = activeView === item.id;
+              return (
+                <button
+                  key={item.id}
+                  onClick={() => setActiveView(item.id as View)}
+                  className={`flex-1 min-w-0 flex flex-col items-center justify-center py-2 px-1 transition-all relative ${
+                    isActive ? 'text-emerald-600' : 'text-slate-400'
+                  }`}
+                >
+                  {isActive && (
+                    <motion.div
+                      layoutId="mobile-active-bg"
+                      className="absolute inset-x-1 inset-y-0.5 rounded-xl bg-emerald-50"
+                      transition={{ type: 'spring', stiffness: 400, damping: 30 }}
+                    />
+                  )}
+                  <Icon size={20} className="relative z-10 transition-transform" style={{ transform: isActive ? 'scale(1.15)' : 'scale(1)' }} />
+                  <span className={`relative z-10 text-[10px] font-bold mt-0.5 truncate w-full text-center leading-none ${
+                    isActive ? 'text-emerald-600' : 'text-slate-400'
+                  }`}>{item.label}</span>
+                </button>
+              );
+            })}
+            {/* Logout tab on mobile */}
+            <button
+              onClick={handleLogout}
+              className="flex-1 min-w-0 flex flex-col items-center justify-center py-2 px-1 text-rose-400 transition-all"
+            >
+              <LogOut size={20} />
+              <span className="text-[10px] font-bold mt-0.5 truncate w-full text-center leading-none">Logout</span>
+            </button>
+          </div>
+        </nav>
+      )}
     </div>
   );
 }

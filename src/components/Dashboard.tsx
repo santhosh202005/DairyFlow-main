@@ -34,42 +34,43 @@ export default function Dashboard({ customerId, onNavigate }: DashboardProps) {
   ];
 
   return (
-    <div className="space-y-12">
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-end gap-6">
+    <div className="space-y-6 md:space-y-12">
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-end gap-4 md:gap-6">
         <div>
-          <div className="flex items-center gap-3 mb-3">
+          <div className="flex items-center gap-3 mb-2 md:mb-3">
             <span className="px-3 py-1 bg-emerald-100 text-emerald-700 text-[10px] font-black rounded-full uppercase tracking-[0.15em]">
               {customerId ? 'Customer Portal' : 'Administrator Control'}
             </span>
           </div>
-          <h2 className="text-5xl font-display font-bold text-slate-900 tracking-tight leading-none mb-3">
+          <h2 className="text-3xl md:text-5xl font-display font-bold text-slate-900 tracking-tight leading-none mb-2 md:mb-3">
             Pulse <span className="text-emerald-600">Overview</span>
           </h2>
-          <p className="text-slate-500 font-medium max-w-md">
+          <p className="text-slate-500 font-medium max-w-md text-sm md:text-base">
             {customerId ? "Real-time metrics for your dairy supply and financial standing." : "Comprehensive control over dairy operations and customer relationships."}
           </p>
         </div>
-        <div className="bg-white px-6 py-3 rounded-[1.2rem] border border-slate-100 shadow-soft">
-          <p className="text-xs text-slate-400 font-bold uppercase tracking-widest mb-1">Observation Date</p>
+        <div className="bg-white px-4 py-2 md:px-6 md:py-3 rounded-[1.2rem] border border-slate-100 shadow-soft">
+          <p className="text-xs text-slate-400 font-bold uppercase tracking-widest mb-0.5 md:mb-1">Observation Date</p>
           <p className="text-sm font-black text-slate-900">{new Date().toLocaleDateString('en-IN', { weekday: 'long', month: 'long', day: 'numeric' })}</p>
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-8">
+      <div className="grid grid-cols-2 md:grid-cols-2 lg:grid-cols-4 gap-4 md:gap-8">
         {statCards.map((stat, i) => (
           <div key={i} className="bento-card relative overflow-hidden group">
-            <div className="relative z-10 flex flex-col gap-6">
-              <div className={`${stat.color} w-12 h-12 rounded-[1rem] text-white flex items-center justify-center shadow-lg transition-transform group-hover:scale-110 group-hover:rotate-3`}>
-                <stat.icon size={22} />
+            <div className="relative z-10 flex flex-col gap-3 md:gap-6">
+              <div className={`${stat.color} w-10 h-10 md:w-12 md:h-12 rounded-[1rem] text-white flex items-center justify-center shadow-lg transition-transform group-hover:scale-110 group-hover:rotate-3`}>
+                <stat.icon size={18} className="md:hidden" />
+                <stat.icon size={22} className="hidden md:block" />
               </div>
               <div>
-                <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-1">{stat.label}</p>
-                <p className="text-3xl font-display font-bold text-slate-900 tracking-tight">{stat.value}</p>
+                <p className="text-[9px] md:text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-1">{stat.label}</p>
+                <p className="text-xl md:text-3xl font-display font-bold text-slate-900 tracking-tight">{stat.value}</p>
               </div>
               {stat.subtext && (
-                <div className="pt-4 border-t border-slate-50 flex items-center gap-2">
+                <div className="pt-2 md:pt-4 border-t border-slate-50 flex items-center gap-2">
                   <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">{stat.subtext}</p>
+                  <p className="text-[9px] md:text-[10px] font-bold text-slate-400 uppercase tracking-wider">{stat.subtext}</p>
                 </div>
               )}
             </div>
@@ -78,10 +79,10 @@ export default function Dashboard({ customerId, onNavigate }: DashboardProps) {
         ))}
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-10">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 md:gap-10">
         <div className="lg:col-span-2 bento-card border-slate-200/50 bg-white/40 backdrop-blur-sm">
-          <div className="flex items-center justify-between mb-10">
-            <h3 className="text-xl font-display font-bold text-slate-900 tracking-tight">Recent Activity</h3>
+          <div className="flex items-center justify-between mb-6 md:mb-10">
+            <h3 className="text-lg md:text-xl font-display font-bold text-slate-900 tracking-tight">Recent Activity</h3>
             <div className="px-3 py-1 rounded-full bg-slate-100 text-[10px] font-bold text-slate-500 uppercase tracking-widest">
               Live Feed
             </div>
