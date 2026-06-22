@@ -25,15 +25,35 @@ import { motion, AnimatePresence } from 'motion/react';
 import Dashboard from './components/Dashboard';
 
 function useIsMobile(query = '(max-width: 768px)') {
-  const [isMobile, setIsMobile] = useState(false);
+  const [isMobile, setIsMobile] = useState(() => {
+    if (typeof window !== 'undefined' && window.matchMedia) {
+      return window.matchMedia(query).matches;
+    }
+    return false;
+  });
+
   useEffect(() => {
     const mql = window.matchMedia?.(query);
     if (!mql) return;
     const onChange = () => setIsMobile(!!mql.matches);
+    
+    if (mql.addEventListener) {
+      mql.addEventListener('change', onChange);
+    } else {
+      mql.addListener(onChange);
+    }
+
     onChange();
-    mql.addEventListener?.('change', onChange);
-    return () => mql.removeEventListener?.('change', onChange);
+
+    return () => {
+      if (mql.removeEventListener) {
+        mql.removeEventListener('change', onChange);
+      } else {
+        mql.removeListener(onChange);
+      }
+    };
   }, [query]);
+
   return isMobile;
 }
 
