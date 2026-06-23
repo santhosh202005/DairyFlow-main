@@ -106,9 +106,12 @@ export default function App() {
     if (customerPhone) localStorage.setItem('dairy_auth_customer_phone', customerPhone);
     if (customerAddress) localStorage.setItem('dairy_auth_customer_address', customerAddress);
     setAuthData({ token, role, customerId, customerName, defaultRate, customerPhone, customerAddress });
+    setActiveView('dashboard');
+    setIsProfileOpen(false);
   };
 
   const handleLogout = () => {
+    // Clear auth storage first
     localStorage.removeItem('dairy_auth_token');
     localStorage.removeItem('dairy_auth_role');
     localStorage.removeItem('dairy_auth_customer_id');
@@ -116,6 +119,12 @@ export default function App() {
     localStorage.removeItem('dairy_auth_default_rate');
     localStorage.removeItem('dairy_auth_customer_phone');
     localStorage.removeItem('dairy_auth_customer_address');
+
+    // Also clear in-app UI state immediately so old screens don't flash
+    setActiveView('dashboard');
+    setIsProfileOpen(false);
+    setIsSidebarOpen(true);
+
     setAuthData({ token: null, role: null });
   };
 
