@@ -96,68 +96,74 @@ export default function Billing({ customerId }: BillingProps) {
         </div>
 
         {/* Summary Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-6 gap-6">
-          <div className="bento-card bg-emerald-50/30 border-emerald-100">
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 md:gap-6">
+          <div className="bento-card bg-emerald-50/30 border-emerald-100 flex flex-col justify-between">
             <div className="flex items-center gap-3 text-emerald-600 mb-6">
-              <div className="w-10 h-10 bg-emerald-600 text-white rounded-xl flex items-center justify-center shadow-lg shadow-emerald-100">
+              <div className="w-10 h-10 bg-emerald-600 text-white rounded-xl flex items-center justify-center shadow-lg shadow-emerald-100 shrink-0">
                 <Droplets size={20} />
               </div>
-              <span className="text-[10px] font-black uppercase tracking-widest leading-tight">Milk<br/>Earnings</span>
+              <span className="text-[10px] font-black uppercase tracking-widest leading-tight text-emerald-700">Milk<br/>Earnings</span>
             </div>
-            <p className="text-3xl font-display font-bold text-emerald-900 tracking-tight">₹{totalMilkAmount.toFixed(0)}</p>
+            <p className="text-2xl md:text-3xl font-display font-bold text-emerald-900 tracking-tight">₹{totalMilkAmount.toFixed(0)}</p>
           </div>
 
-          <div className="bento-card border-blue-100 bg-white">
+          <div className="bento-card border-blue-100 bg-white flex flex-col justify-between">
             <div className="flex items-center gap-3 text-blue-500 mb-6 font-display">
-               <div className="w-10 h-10 bg-blue-500 text-white rounded-xl flex items-center justify-center shadow-lg shadow-blue-100">
+               <div className="w-10 h-10 bg-blue-500 text-white rounded-xl flex items-center justify-center shadow-lg shadow-blue-100 shrink-0">
                 <Wallet size={20} />
               </div>
-              <span className="text-[10px] font-black uppercase tracking-widest leading-tight text-slate-400">Cash<br/>Advances</span>
+              <span className="text-[10px] font-black uppercase tracking-widest leading-tight text-slate-500">Cash<br/>Advances</span>
             </div>
-            <p className="text-3xl font-display font-bold text-blue-600 tracking-tight">₹{totalCashAdvances.toFixed(0)}</p>
-            <p className="text-[8px] text-blue-400 mt-2 uppercase font-black tracking-widest">Informational</p>
+            <div>
+              <p className="text-2xl md:text-3xl font-display font-bold text-blue-600 tracking-tight">₹{totalCashAdvances.toFixed(0)}</p>
+              <p className="text-[8px] text-blue-400 mt-2 uppercase font-black tracking-widest">Informational</p>
+            </div>
           </div>
 
-          <div className="bento-card border-emerald-100 bg-white">
+          <div className="bento-card border-emerald-100 bg-white flex flex-col justify-between">
             <div className="flex items-center gap-3 text-emerald-500 mb-6">
-              <div className="w-10 h-10 bg-emerald-500 text-white rounded-xl flex items-center justify-center shadow-lg shadow-emerald-100">
+              <div className="w-10 h-10 bg-emerald-500 text-white rounded-xl flex items-center justify-center shadow-lg shadow-emerald-100 shrink-0">
                 <Wallet size={20} />
               </div>
-              <span className="text-[10px] font-black uppercase tracking-widest leading-tight text-slate-400">Bill<br/>Reduction</span>
+              <span className="text-[10px] font-black uppercase tracking-widest leading-tight text-slate-500">Bill<br/>Reduction</span>
             </div>
-            <p className="text-3xl font-display font-bold text-emerald-600 tracking-tight">₹{totalBillDeductions.toFixed(0)}</p>
-            <p className="text-[8px] text-emerald-400 mt-2 uppercase font-black tracking-widest">Subtracted</p>
+            <div>
+              <p className="text-2xl md:text-3xl font-display font-bold text-emerald-600 tracking-tight">₹{totalBillDeductions.toFixed(0)}</p>
+              <p className="text-[8px] text-emerald-400 mt-2 uppercase font-black tracking-widest">Subtracted</p>
+            </div>
           </div>
 
-          <div className="bento-card border-orange-100 bg-white">
+          <div className="bento-card border-orange-100 bg-white flex flex-col justify-between">
             <div className="flex items-center gap-3 text-orange-500 mb-6">
-              <div className="w-10 h-10 bg-orange-500 text-white rounded-xl flex items-center justify-center shadow-lg shadow-orange-100">
+              <div className="w-10 h-10 bg-orange-500 text-white rounded-xl flex items-center justify-center shadow-lg shadow-orange-100 shrink-0">
                 <Package size={20} />
               </div>
-              <span className="text-[10px] font-black uppercase tracking-widest leading-tight text-slate-400">Feed<br/>Expenses</span>
+              <span className="text-[10px] font-black uppercase tracking-widest leading-tight text-slate-500">Feed<br/>Expenses</span>
             </div>
-            <p className="text-3xl font-display font-bold text-orange-600 tracking-tight">₹{totalFeedAmount.toFixed(0)}</p>
-            <p className="text-[8px] text-orange-400 mt-2 uppercase font-black tracking-widest">Subtracted</p>
+            <div>
+              <p className="text-2xl md:text-3xl font-display font-bold text-orange-600 tracking-tight">₹{totalFeedAmount.toFixed(0)}</p>
+              <p className="text-[8px] text-orange-400 mt-2 uppercase font-black tracking-widest">Subtracted</p>
+            </div>
           </div>
 
-          <div className="bento-card border-rose-100 bg-rose-50/20">
+          <div className="bento-card border-rose-100 bg-rose-50/20 flex flex-col justify-between">
             <div className="flex items-center gap-3 text-rose-500 mb-6">
-              <div className="w-10 h-10 bg-rose-500 text-white rounded-xl flex items-center justify-center shadow-lg shadow-rose-100">
+              <div className="w-10 h-10 bg-rose-500 text-white rounded-xl flex items-center justify-center shadow-lg shadow-rose-100 shrink-0">
                 <Package size={20} />
               </div>
-              <span className="text-[10px] font-black uppercase tracking-widest leading-tight">Total<br/>Debt</span>
+              <span className="text-[10px] font-black uppercase tracking-widest leading-tight text-rose-700">Total<br/>Debt</span>
             </div>
-            <p className="text-3xl font-display font-bold text-rose-600 tracking-tight">₹{((detailedData as any).advanceBalance || 0).toFixed(0)}</p>
+            <p className="text-2xl md:text-3xl font-display font-bold text-rose-600 tracking-tight">₹{((detailedData as any).advanceBalance || 0).toFixed(0)}</p>
           </div>
 
-          <div className="bento-card bg-slate-900 text-white shadow-xl">
+          <div className="bento-card bg-slate-900 text-white shadow-xl flex flex-col justify-between">
             <div className="flex items-center gap-3 text-slate-400 mb-6">
-              <div className="w-10 h-10 bg-white/10 text-white rounded-xl flex items-center justify-center shadow-lg">
+              <div className="w-10 h-10 bg-white/10 text-white rounded-xl flex items-center justify-center shadow-lg shrink-0">
                 <FileText size={20} />
               </div>
-              <span className="text-[10px] font-black uppercase tracking-widest leading-tight">Net<br/>Payout</span>
+              <span className="text-[10px] font-black uppercase tracking-widest leading-tight text-slate-300">Net<br/>Payout</span>
             </div>
-            <p className="text-4xl font-display font-bold tracking-tight">₹{finalPayable.toFixed(0)}</p>
+            <p className="text-3xl md:text-4xl font-display font-bold tracking-tight text-emerald-400">₹{finalPayable.toFixed(0)}</p>
           </div>
         </div>
 
@@ -276,11 +282,11 @@ export default function Billing({ customerId }: BillingProps) {
               <table className="w-full text-left">
                 <thead className="bg-white/90 backdrop-blur sticky top-0 z-10">
                   <tr className="border-b border-slate-50">
-                    <th className="px-8 py-4 font-black text-slate-300 text-[10px] uppercase tracking-widest">Date</th>
-                    <th className="px-8 py-4 font-black text-slate-300 text-[10px] uppercase tracking-widest">Shift</th>
-                    <th className="px-8 py-4 font-black text-slate-300 text-[10px] uppercase tracking-widest">Liters</th>
-                    <th className="px-8 py-4 font-black text-slate-300 text-[10px] uppercase tracking-widest">Rate</th>
-                    <th className="px-8 py-4 font-black text-slate-300 text-[10px] uppercase tracking-widest text-right">Value (₹)</th>
+                    <th className="px-8 py-4 font-black text-slate-500 text-[10px] uppercase tracking-widest">Date</th>
+                    <th className="px-8 py-4 font-black text-slate-500 text-[10px] uppercase tracking-widest">Shift</th>
+                    <th className="px-8 py-4 font-black text-slate-500 text-[10px] uppercase tracking-widest">Liters</th>
+                    <th className="px-8 py-4 font-black text-slate-500 text-[10px] uppercase tracking-widest">Rate</th>
+                    <th className="px-8 py-4 font-black text-slate-500 text-[10px] uppercase tracking-widest text-right">Value (₹)</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-50/50">
@@ -332,10 +338,10 @@ export default function Billing({ customerId }: BillingProps) {
                 <table className="w-full text-left">
                    <thead className="bg-white border-b border-slate-50">
                       <tr>
-                         <th className="px-8 py-4 text-[10px] font-black text-slate-300 uppercase tracking-widest">Date</th>
-                         <th className="px-8 py-4 text-[10px] font-black text-slate-300 uppercase tracking-widest">Item</th>
-                         <th className="px-8 py-4 text-[10px] font-black text-slate-300 uppercase tracking-widest">Qty</th>
-                         <th className="px-8 py-4 text-[10px] font-black text-slate-300 uppercase tracking-widest text-right">Cost</th>
+                         <th className="px-8 py-4 text-[10px] font-black text-slate-500 uppercase tracking-widest">Date</th>
+                         <th className="px-8 py-4 text-[10px] font-black text-slate-500 uppercase tracking-widest">Item</th>
+                         <th className="px-8 py-4 text-[10px] font-black text-slate-500 uppercase tracking-widest">Qty</th>
+                         <th className="px-8 py-4 text-[10px] font-black text-slate-500 uppercase tracking-widest text-right">Cost</th>
                       </tr>
                    </thead>
                    <tbody className="divide-y divide-slate-50">
@@ -368,9 +374,9 @@ export default function Billing({ customerId }: BillingProps) {
                 <table className="w-full text-left">
                    <thead className="bg-white border-b border-slate-50">
                       <tr>
-                         <th className="px-8 py-4 text-[10px] font-black text-slate-300 uppercase tracking-widest">Date</th>
-                         <th className="px-8 py-4 text-[10px] font-black text-slate-300 uppercase tracking-widest">Type</th>
-                         <th className="px-8 py-4 text-[10px] font-black text-slate-300 uppercase tracking-widest text-right">Amount</th>
+                         <th className="px-8 py-4 text-[10px] font-black text-slate-500 uppercase tracking-widest">Date</th>
+                         <th className="px-8 py-4 text-[10px] font-black text-slate-500 uppercase tracking-widest">Type</th>
+                         <th className="px-8 py-4 text-[10px] font-black text-slate-500 uppercase tracking-widest text-right">Amount</th>
                       </tr>
                    </thead>
                    <tbody className="divide-y divide-slate-50">
@@ -456,13 +462,13 @@ export default function Billing({ customerId }: BillingProps) {
           <table className="w-full text-left border-collapse">
             <thead>
               <tr className="bg-slate-50/50 border-b border-slate-50">
-                <th className="px-10 py-6 font-black text-slate-300 text-[10px] uppercase tracking-[0.2em]">Primary Farmer</th>
-                <th className="px-10 py-6 font-black text-slate-300 text-[10px] uppercase tracking-[0.2em]">Vol (L)</th>
-                <th className="px-10 py-6 font-black text-slate-300 text-[10px] uppercase tracking-[0.2em]">Gross Revenue</th>
-                <th className="px-10 py-6 font-black text-slate-300 text-[10px] uppercase tracking-[0.2em]">Total Reduction</th>
-                <th className="px-10 py-6 font-black text-slate-300 text-[10px] uppercase tracking-[0.2em] text-right">Debt Balance</th>
-                <th className="px-10 py-6 font-black text-slate-300 text-[10px] uppercase tracking-[0.2em] text-right">Net Settlement</th>
-                <th className="px-10 py-6 font-black text-slate-300 text-[10px] uppercase tracking-[0.2em] text-center">Inspect</th>
+                <th className="px-10 py-6 font-black text-slate-500 text-[10px] uppercase tracking-[0.2em]">Primary Farmer</th>
+                <th className="px-10 py-6 font-black text-slate-500 text-[10px] uppercase tracking-[0.2em]">Vol (L)</th>
+                <th className="px-10 py-6 font-black text-slate-500 text-[10px] uppercase tracking-[0.2em]">Gross Revenue</th>
+                <th className="px-10 py-6 font-black text-slate-500 text-[10px] uppercase tracking-[0.2em]">Total Reduction</th>
+                <th className="px-10 py-6 font-black text-slate-500 text-[10px] uppercase tracking-[0.2em] text-right">Debt Balance</th>
+                <th className="px-10 py-6 font-black text-slate-500 text-[10px] uppercase tracking-[0.2em] text-right">Net Settlement</th>
+                <th className="px-10 py-6 font-black text-slate-500 text-[10px] uppercase tracking-[0.2em] text-center">Inspect</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-50">

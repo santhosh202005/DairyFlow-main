@@ -16,7 +16,7 @@ import {
   Info,
   LogOut,
   Package,
-  Settings,
+  Settings as SettingsIcon,
   User,
   Phone,
   MapPin
@@ -60,12 +60,11 @@ function useIsMobile(query = '(max-width: 768px)') {
 import Customers from './components/Customers';
 import MilkEntries from './components/MilkEntries';
 import Advances from './components/Advances';
-import Billing from './components/Billing';
 import CattleFeed from './components/CattleFeed';
-import About from './components/About';
 import Login from './components/Login';
+import Settings from './components/Settings';
 
-type View = 'dashboard' | 'customers' | 'entries' | 'advances' | 'billing' | 'feed' | 'about';
+type View = 'dashboard' | 'customers' | 'entries' | 'advances' | 'feed' | 'settings';
 
 export default function App() {
   const [activeView, setActiveView] = useState<View>('dashboard');
@@ -131,14 +130,12 @@ export default function App() {
       { id: 'entries', label: 'Logistics', icon: Milk },
       { id: 'advances', label: 'Ledger', icon: Wallet },
       { id: 'feed', label: 'Resources', icon: Package },
-      { id: 'billing', label: 'Journal', icon: FileText },
     ] : [
       { id: 'entries', label: 'My Supply', icon: Milk },
       { id: 'advances', label: 'My Ledger', icon: Wallet },
       { id: 'feed', label: 'My Stocks', icon: Package },
-      { id: 'billing', label: 'My Reports', icon: FileText },
     ]),
-    { id: 'about', label: 'About', icon: Info },
+    { id: 'settings', label: 'Settings', icon: SettingsIcon },
   ];
 
   const isMobile = useIsMobile();
@@ -197,20 +194,10 @@ export default function App() {
           })}
         </nav>
 
-        <div className="p-6 border-t border-slate-50 space-y-4">
-          <button 
-            onClick={handleLogout}
-            className={`w-full flex items-center gap-4 p-4 rounded-2xl transition-all text-rose-500 hover:bg-rose-50 font-bold text-sm ${
-              !isSidebarOpen && 'justify-center'
-            }`}
-          >
-            <LogOut size={22} />
-            {isSidebarOpen && <span>Sign Out</span>}
-          </button>
-          
+        <div className="p-6 border-t border-slate-50">
           <button 
             onClick={() => setIsSidebarOpen(!isSidebarOpen)}
-            className="w-full flex items-center justify-center p-3 text-slate-300 hover:text-slate-500 hover:bg-slate-50 rounded-xl transition-all"
+            className="w-full flex items-center justify-center p-3 text-slate-300 hover:text-slate-500 hover:bg-slate-50 rounded-xl transition-all cursor-pointer"
           >
             <motion.div animate={{ rotate: isSidebarOpen ? 0 : 180 }}>
               {isSidebarOpen ? <X size={20} /> : <ChevronRight size={20} />}
@@ -286,12 +273,24 @@ export default function App() {
                       )}
                     </div>
                     <div className="p-2">
-                      <button className="w-full flex items-center gap-3 px-3 py-2.5 text-sm font-medium text-slate-600 hover:text-emerald-600 hover:bg-emerald-50 rounded-xl transition-colors">
+                      <button 
+                        onClick={() => {
+                          setActiveView('settings');
+                          setIsProfileOpen(false);
+                        }}
+                        className="w-full flex items-center gap-3 px-3 py-2.5 text-sm font-medium text-slate-600 hover:text-emerald-600 hover:bg-emerald-50 rounded-xl transition-colors cursor-pointer"
+                      >
                         <User size={16} />
                         My Profile
                       </button>
-                      <button className="w-full flex items-center gap-3 px-3 py-2.5 text-sm font-medium text-slate-600 hover:text-emerald-600 hover:bg-emerald-50 rounded-xl transition-colors">
-                        <Settings size={16} />
+                      <button 
+                        onClick={() => {
+                          setActiveView('settings');
+                          setIsProfileOpen(false);
+                        }}
+                        className="w-full flex items-center gap-3 px-3 py-2.5 text-sm font-medium text-slate-600 hover:text-emerald-600 hover:bg-emerald-50 rounded-xl transition-colors cursor-pointer"
+                      >
+                        <SettingsIcon size={16} />
                         Account Settings
                       </button>
                     </div>
@@ -332,8 +331,7 @@ export default function App() {
               {activeView === 'entries' && <MilkEntries customerId={authData.customerId} isAdmin={authData.role === 'admin'} defaultRate={authData.defaultRate} />}
               {activeView === 'advances' && <Advances customerId={authData.customerId} isAdmin={authData.role === 'admin'} />}
               {activeView === 'feed' && <CattleFeed customerId={authData.customerId} isAdmin={authData.role === 'admin'} />}
-              {activeView === 'billing' && <Billing customerId={authData.role === 'admin' ? undefined : authData.customerId} />}
-              {activeView === 'about' && <About />}
+              {activeView === 'settings' && <Settings authData={authData} onLogout={handleLogout} />}
             </motion.div>
           </AnimatePresence>
         </div>
@@ -368,14 +366,6 @@ export default function App() {
                 </button>
               );
             })}
-            {/* Logout tab on mobile */}
-            <button
-              onClick={handleLogout}
-              className="flex-1 min-w-0 flex flex-col items-center justify-center py-2 px-1 text-rose-400 transition-all"
-            >
-              <LogOut size={20} />
-              <span className="text-[10px] font-bold mt-0.5 truncate w-full text-center leading-none">Logout</span>
-            </button>
           </div>
         </nav>
       )}
