@@ -20,6 +20,19 @@ export default function Login({ onLogin }: LoginProps) {
   const [newPassword, setNewPassword] = useState('');
   const [isOtpSent, setIsOtpSent] = useState(false);
 
+  // Mount-time guard: prevent OTP/forgot UI from showing due to any stale in-memory state.
+  // OTP can only appear after the user explicitly clicks “Forgot Password?”.
+  React.useEffect(() => {
+    setIsForgotPassword(false);
+    setIsOtpSent(false);
+    setPhone('');
+    setOtp('');
+    setNewPassword('');
+    setError('');
+    setMessage('');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
   const [isLoading, setIsLoading] = useState(false);

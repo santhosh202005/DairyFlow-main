@@ -1,8 +1,10 @@
 # TODO
 
-- [x] Fix logout/state persistence: clear active page (activeView) immediately and prevent showing previous page on refresh when token is missing.
-- [ ] Implement login state rehydration correctly (guard against stale authData and reset activeView to dashboard when no token).
-- [ ] Remove any lingering UI state that can survive refresh (e.g., mobile nav active bg/layoutId issues if applicable).
-- [ ] Test: login, navigate, refresh; verify that correct screen shows based on auth token only.
-- [ ] Test logout + refresh; verify login page shown and previous app page not visible.
+- [ ] Update PWA/service worker handling to prevent stale old frontend bundle
+  - [ ] Add versioned SW caching logic in `src/main.tsx` (register `/sw.js?v=...` or unregister+refresh)
+  - [ ] Ensure production build invalidates SW by changing registration version
+- [ ] Test flow end-to-end
+  - [ ] Hard reload / clear site data
+  - [ ] Login using new username/password
+  - [ ] Verify Settings page loads
 
