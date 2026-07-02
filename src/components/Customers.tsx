@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { Plus, Search, Edit2, Trash2, X, Milk } from 'lucide-react';
-import { motion } from 'motion/react';
+import { Plus, Search, Edit2, Trash2, X, Milk, Phone, MapPin, User } from 'lucide-react';
+import { motion, AnimatePresence } from 'motion/react';
 import { Customer } from '../types';
 import MilkEntries from './MilkEntries';
 
@@ -17,7 +17,8 @@ export default function Customers() {
     address: '',
     username: '',
     password: '',
-    default_rate: 30
+    default_rate: 30,
+    gender: 'male' as 'male' | 'female',
   });
 
   useEffect(() => {
@@ -43,7 +44,7 @@ export default function Customers() {
 
     setIsModalOpen(false);
     setEditingCustomer(null);
-    setFormData({ name: '', phone: '', address: '', username: '', password: '', default_rate: 30 });
+    setFormData({ name: '', phone: '', address: '', username: '', password: '', default_rate: 30, gender: 'male' });
     fetchCustomers();
   };
 
@@ -59,215 +60,321 @@ export default function Customers() {
   );
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-col md:flex-row gap-4 justify-between items-center">
-        <div className="relative w-full md:w-96">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+    <div className="space-y-4 md:space-y-6">
+      {/* Search + Add */}
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="relative flex-1 sm:max-w-xs">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
           <input
             type="text"
             placeholder="Search customers..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className="w-full pl-10 pr-4 py-2 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all"
+            className="input-base pl-9 rounded-xl"
           />
         </div>
         <button
           onClick={() => {
             setEditingCustomer(null);
-            setFormData({ name: '', phone: '', address: '', username: '', password: '', default_rate: 30 });
+            setFormData({ name: '', phone: '', address: '', username: '', password: '', default_rate: 30, gender: 'male' });
             setIsModalOpen(true);
           }}
-          className="w-full md:w-auto flex items-center justify-center gap-2 bg-emerald-600 text-white px-6 py-2 rounded-xl hover:bg-emerald-700 transition-colors shadow-sm"
+          className="flex items-center justify-center gap-2 bg-emerald-600 text-white px-5 py-3 rounded-xl hover:bg-emerald-700 transition-colors shadow-sm font-bold text-sm touch-btn w-full sm:w-auto"
         >
-          <Plus size={20} />
+          <Plus size={18} />
           Add Customer
         </button>
       </div>
 
-      <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
-        <table className="w-full text-left border-collapse">
-          <thead>
+      {/* Desktop/tablet table */}
+      <div className="bg-white rounded-2xl shadow-soft border border-slate-100 overflow-hidden hidden sm:block">
+        <div className="overflow-x-auto">
+          <table className="w-full text-left border-collapse mobile-compact-table">
+            <thead>
               <tr className="bg-slate-50 border-b border-slate-100">
-                <th className="p-4 font-semibold text-slate-600 text-sm uppercase tracking-wider">Name</th>
-                <th className="p-4 font-semibold text-slate-600 text-sm uppercase tracking-wider">Phone</th>
-                <th className="p-4 font-semibold text-slate-600 text-sm uppercase tracking-wider">Default Rate</th>
-                <th className="p-4 font-semibold text-slate-600 text-sm uppercase tracking-wider text-right">Actions</th>
+                <th className="p-3 md:p-4 font-semibold text-slate-600 text-[11px] md:text-sm uppercase tracking-wider">Name</th>
+                <th className="hidden md:table-cell p-3 md:p-4 font-semibold text-slate-600 text-[11px] md:text-sm uppercase tracking-wider">Phone</th>
+                <th className="hidden lg:table-cell p-3 md:p-4 font-semibold text-slate-600 text-[11px] md:text-sm uppercase tracking-wider">Rate</th>
+                <th className="p-3 md:p-4 font-semibold text-slate-600 text-[11px] md:text-sm uppercase tracking-wider text-right">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {filteredCustomers.map((customer) => (
-                <tr key={customer.id} className="hover:bg-slate-50 transition-colors">
-                  <td className="p-4 font-medium text-slate-900">{customer.name}</td>
-                  <td className="p-4 text-slate-600">{customer.phone}</td>
-                  <td className="p-4 text-slate-600">₹{customer.default_rate || 30}/L</td>
-                  <td className="p-4 text-right space-x-2">
-                  <button
-                    onClick={() => setHistoryCustomerId(customer.id)}
-                    className="p-2 text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors"
-                    title="View Milk History"
-                  >
-                    <Milk size={18} />
-                  </button>
-                  <button
-                    onClick={() => {
-                      setEditingCustomer(customer);
-                      setFormData({ 
-                        name: customer.name, 
-                        phone: customer.phone, 
-                        address: customer.address,
-                        username: customer.username || '',
-                        password: customer.password || '',
-                        default_rate: customer.default_rate || 30
-                      });
-                      setIsModalOpen(true);
-                    }}
-                    className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
-                  >
-                    <Edit2 size={18} />
-                  </button>
-                  <button
-                    onClick={() => handleDelete(customer.id)}
-                    className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
-                  >
-                    <Trash2 size={18} />
-                  </button>
-                </td>
-              </tr>
-            ))}
-            {filteredCustomers.length === 0 && (
-              <tr>
-                <td colSpan={4} className="p-8 text-center text-slate-400 italic">
-                  No customers found.
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
+                <tr key={customer.id} className="hover:bg-slate-50 transition-colors group">
+                  <td className="p-3 md:p-4 font-medium text-slate-900 text-sm leading-tight">
+                    <div>
+                      <p className="font-bold text-slate-900">{customer.name}</p>
+                      <p className="text-xs text-slate-400 md:hidden mt-0.5">{customer.phone}</p>
+                    </div>
+                  </td>
+                  <td className="hidden md:table-cell p-3 md:p-4 text-slate-600 text-sm">{customer.phone}</td>
+                  <td className="hidden lg:table-cell p-3 md:p-4 text-slate-600 text-sm">₹{customer.default_rate || 30}/L</td>
+                  <td className="p-3 md:p-4 text-right">
+                    <div className="flex items-center justify-end gap-1">
+                      <button
+                        onClick={() => setHistoryCustomerId(customer.id)}
+                        className="p-2 text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors touch-btn"
+                        title="View Milk History"
+                      >
+                        <Milk size={15} />
+                      </button>
+                      <button
+                        onClick={() => {
+                          setEditingCustomer(customer);
+                          setFormData({ 
+                            name: customer.name, 
+                            phone: customer.phone, 
+                            address: customer.address,
+                            username: customer.username || '',
+                            password: customer.password || '',
+                            default_rate: customer.default_rate || 30,
+                            gender: customer.gender || 'male',
+                          });
+                          setIsModalOpen(true);
+                        }}
+                        className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors touch-btn"
+                      >
+                        <Edit2 size={15} />
+                      </button>
+                      <button
+                        onClick={() => handleDelete(customer.id)}
+                        className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors touch-btn"
+                      >
+                        <Trash2 size={15} />
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+              {filteredCustomers.length === 0 && (
+                <tr>
+                  <td colSpan={4} className="p-8 md:p-12 text-center text-slate-400 italic text-sm">
+                    No customers found.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
       </div>
 
-      {/* Modal */}
-      {isModalOpen && (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <motion.div
-            initial={{ opacity: 0, scale: 0.95 }}
-            animate={{ opacity: 1, scale: 1 }}
-            className="bg-white rounded-2xl shadow-xl w-full max-w-md overflow-hidden"
-          >
-            <div className="p-6 border-b border-slate-100 flex justify-between items-center">
-              <h3 className="text-xl font-bold text-slate-800">
-                {editingCustomer ? 'Edit Customer' : 'Add New Customer'}
-              </h3>
-              <button onClick={() => setIsModalOpen(false)} className="text-slate-400 hover:text-slate-600">
-                <X size={24} />
-              </button>
+      {/* Mobile card list */}
+      <div className="sm:hidden space-y-2.5">
+        {filteredCustomers.length === 0 && (
+          <div className="bg-white rounded-2xl border border-slate-100 p-8 text-center">
+            <div className="w-12 h-12 rounded-xl bg-slate-50 flex items-center justify-center text-slate-200 mx-auto mb-3">
+              <User size={24} />
             </div>
-            <form onSubmit={handleSubmit} className="p-6 space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">Full Name</label>
-                <input
-                  required
-                  type="text"
-                  value={formData.name}
-                  onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                  className="w-full p-2 rounded-lg border border-slate-200 focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 outline-none"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">Phone Number</label>
-                <input
-                  required
-                  type="tel"
-                  value={formData.phone}
-                  onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
-                  className="w-full p-2 rounded-lg border border-slate-200 focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 outline-none"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">Address</label>
-                <textarea
-                  required
-                  rows={3}
-                  value={formData.address}
-                  onChange={(e) => setFormData({ ...formData, address: e.target.value })}
-                  className="w-full p-2 rounded-lg border border-slate-200 focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 outline-none resize-none"
-                />
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">Username</label>
-                  <input
-                    required
-                    type="text"
-                    value={formData.username}
-                    onChange={(e) => setFormData({ ...formData, username: e.target.value })}
-                    className="w-full p-2 rounded-lg border border-slate-200 focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 outline-none"
-                  />
+            <p className="text-sm font-bold text-slate-400">No Customers</p>
+            <p className="text-xs text-slate-300 mt-1">Tap "Add Customer" to register a farmer.</p>
+          </div>
+        )}
+        {filteredCustomers.map((customer) => (
+          <motion.div
+            key={customer.id}
+            initial={{ opacity: 0, y: 6 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="bg-white rounded-xl border border-slate-100 p-4 shadow-soft"
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex items-center gap-3 flex-1 min-w-0">
+                <div className="w-10 h-10 rounded-xl bg-emerald-50 flex items-center justify-center text-emerald-600 font-black text-sm flex-shrink-0">
+                  {customer.name.charAt(0).toUpperCase()}
                 </div>
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">Password</label>
-                  <input
-                    required
-                    type="text"
-                    value={formData.password}
-                    onChange={(e) => setFormData({ ...formData, password: e.target.value })}
-                    className="w-full p-2 rounded-lg border border-slate-200 focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 outline-none"
-                  />
+                <div className="min-w-0">
+                  <p className="font-bold text-slate-900 text-sm truncate">{customer.name}</p>
+                  <div className="flex items-center gap-3 mt-0.5">
+                    {customer.phone && (
+                      <span className="text-[11px] text-slate-400 flex items-center gap-1">
+                        <Phone size={10} />
+                        {customer.phone}
+                      </span>
+                    )}
+                    <span className="text-[11px] text-emerald-600 font-bold">₹{customer.default_rate || 30}/L</span>
+                  </div>
                 </div>
               </div>
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">Default Milk Rate (₹/L)</label>
-                <input
-                  required
-                  type="number"
-                  step="0.1"
-                  value={formData.default_rate}
-                  onChange={(e) => setFormData({ ...formData, default_rate: parseFloat(e.target.value) })}
-                  className="w-full p-2 rounded-lg border border-slate-200 focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 outline-none"
-                />
-              </div>
-              <div className="pt-4">
+              <div className="flex items-center gap-1 flex-shrink-0">
                 <button
-                  type="submit"
-                  className="w-full bg-emerald-600 text-white py-3 rounded-xl font-bold hover:bg-emerald-700 transition-colors shadow-md"
+                  onClick={() => setHistoryCustomerId(customer.id)}
+                  className="p-2 text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors touch-btn"
                 >
-                  {editingCustomer ? 'Update Customer' : 'Save Customer'}
+                  <Milk size={16} />
+                </button>
+                <button
+                  onClick={() => {
+                    setEditingCustomer(customer);
+                    setFormData({ 
+                      name: customer.name, 
+                      phone: customer.phone, 
+                      address: customer.address,
+                      username: customer.username || '',
+                      password: customer.password || '',
+                      default_rate: customer.default_rate || 30,
+                      gender: customer.gender || 'male',
+                    });
+                    setIsModalOpen(true);
+                  }}
+                  className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors touch-btn"
+                >
+                  <Edit2 size={16} />
+                </button>
+                <button
+                  onClick={() => handleDelete(customer.id)}
+                  className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors touch-btn"
+                >
+                  <Trash2 size={16} />
                 </button>
               </div>
-            </form>
+            </div>
           </motion.div>
-        </div>
-      )}
+        ))}
+      </div>
+
+      {/* Add/Edit Modal */}
+      <AnimatePresence>
+        {isModalOpen && (
+          <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-end sm:items-center justify-center p-0 sm:p-4">
+            <motion.div
+              initial={{ opacity: 0, y: 40 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 40 }}
+              className="bg-white rounded-t-3xl sm:rounded-2xl shadow-xl w-full sm:max-w-md overflow-hidden"
+            >
+              <div className="w-10 h-1 bg-slate-200 rounded-full mx-auto mt-3 mb-1 sm:hidden" />
+              <div className="p-5 border-b border-slate-100 flex justify-between items-center">
+                <h3 className="text-lg font-bold text-slate-800">
+                  {editingCustomer ? 'Edit Customer' : 'Add New Customer'}
+                </h3>
+                <button onClick={() => setIsModalOpen(false)} className="p-1.5 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition-all touch-btn">
+                  <X size={20} />
+                </button>
+              </div>
+              <form onSubmit={handleSubmit} className="p-5 space-y-3.5 modal-scroll">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1.5">Full Name</label>
+                  <input
+                    required
+                    type="text"
+                    value={formData.name}
+                    onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                    className="input-base"
+                    placeholder="Enter full name"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1.5">Phone Number</label>
+                  <input
+                    required
+                    type="tel"
+                    value={formData.phone}
+                    onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
+                    className="input-base"
+                    placeholder="Enter phone number"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1.5">Address</label>
+                  <textarea
+                    required
+                    rows={2}
+                    value={formData.address}
+                    onChange={(e) => setFormData({ ...formData, address: e.target.value })}
+                    className="input-base resize-none"
+                    placeholder="Enter address"
+                  />
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 mb-1.5">Username</label>
+                    <input
+                      required
+                      type="text"
+                      value={formData.username}
+                      onChange={(e) => setFormData({ ...formData, username: e.target.value })}
+                      className="input-base"
+                      placeholder="Username"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 mb-1.5">Password</label>
+                    <input
+                      required
+                      type="text"
+                      value={formData.password}
+                      onChange={(e) => setFormData({ ...formData, password: e.target.value })}
+                      className="input-base"
+                      placeholder="Password"
+                    />
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1.5">Gender</label>
+                  <select
+                    value={formData.gender}
+                    onChange={(e) => setFormData({ ...formData, gender: e.target.value as 'male' | 'female' })}
+                    className="input-base"
+                  >
+                    <option value="male">Male</option>
+                    <option value="female">Female</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1.5">Default Milk Rate (₹/L)</label>
+                  <input
+                    required
+                    type="number"
+                    step="0.1"
+                    value={formData.default_rate}
+                    onChange={(e) => setFormData({ ...formData, default_rate: parseFloat(e.target.value) })}
+                    className="input-base"
+                  />
+                </div>
+                <div className="pt-2">
+                  <button
+                    type="submit"
+                    className="w-full bg-emerald-600 text-white py-3.5 rounded-xl font-bold hover:bg-emerald-700 transition-colors shadow-md text-sm touch-btn"
+                  >
+                    {editingCustomer ? 'Update Customer' : 'Save Customer'}
+                  </button>
+                </div>
+              </form>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
       {/* History Modal */}
       {historyCustomerId && (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-2 sm:p-4">
           <motion.div
             initial={{ opacity: 0, scale: 0.95 }}
             animate={{ opacity: 1, scale: 1 }}
-            className="bg-white rounded-2xl shadow-xl w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col"
+            className="bg-white rounded-2xl shadow-xl w-full max-w-4xl max-h-[92vh] overflow-hidden flex flex-col"
           >
-            <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50">
+            <div className="p-4 md:p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50">
               <div>
-                <h3 className="text-xl font-bold text-slate-800">
-                  Supply History: {customers.find(c => c.id === historyCustomerId)?.name}
+                <h3 className="text-base md:text-xl font-bold text-slate-800">
+                  {customers.find(c => c.id === historyCustomerId)?.name}
                 </h3>
-                <p className="text-sm text-slate-500">Detailed milk records for this customer</p>
+                <p className="text-xs text-slate-500">Milk supply history</p>
               </div>
               <button 
                 onClick={() => setHistoryCustomerId(null)} 
-                className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-200 rounded-full transition-all"
+                className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-200 rounded-full transition-all touch-btn"
               >
-                <X size={24} />
+                <X size={20} />
               </button>
             </div>
-            <div className="p-6 overflow-y-auto flex-1">
+            <div className="p-4 md:p-6 overflow-y-auto flex-1">
               <MilkEntries customerId={historyCustomerId} isAdmin={true} />
             </div>
-            <div className="p-4 border-t border-slate-100 bg-slate-50 text-right">
+            <div className="p-3 md:p-4 border-t border-slate-100 bg-slate-50 text-right">
               <button 
                 onClick={() => setHistoryCustomerId(null)}
-                className="px-6 py-2 bg-slate-200 text-slate-700 rounded-xl font-bold hover:bg-slate-300 transition-all"
+                className="px-5 py-2.5 bg-slate-200 text-slate-700 rounded-xl font-bold hover:bg-slate-300 transition-all text-sm touch-btn"
               >
-                Close History
+                Close
               </button>
             </div>
           </motion.div>

@@ -1,4 +1,4 @@
-import "dotenv/config";
+ import "dotenv/config";
 import express from "express";
 import { createServer as createViteServer } from "vite";
 import { createClient } from "@libsql/client";
@@ -57,6 +57,8 @@ async function initDB() {
   try { await db.execute("ALTER TABLE advances ADD COLUMN type TEXT NOT NULL DEFAULT 'advance'"); } catch (_) {}
   try { await db.execute("ALTER TABLE customers ADD COLUMN default_rate REAL DEFAULT 30"); } catch (_) {}
   try { await db.execute("ALTER TABLE milk_entries ADD COLUMN rate REAL NOT NULL DEFAULT 30"); } catch (_) {}
+  try { await db.execute("ALTER TABLE customers ADD COLUMN cattle_feed_reduction REAL DEFAULT 0"); } catch (_) {}
+  try { await db.execute("ALTER TABLE customers ADD COLUMN gender TEXT"); } catch (_) {}
 
   await db.executeMultiple(`
     CREATE TABLE IF NOT EXISTS customers (
@@ -67,6 +69,8 @@ async function initDB() {
       username TEXT UNIQUE,
       password TEXT,
       default_rate REAL DEFAULT 30,
+      cattle_feed_reduction REAL DEFAULT 0,
+      gender TEXT,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
 
@@ -198,6 +202,7 @@ async function startServer() {
           defaultRate: customer.default_rate,
           customerPhone: customer.phone,
           customerAddress: customer.address,
+          customerGender: customer.gender || 'male',
         });
       }
     } catch (dbError) {
@@ -205,6 +210,39 @@ async function startServer() {
     }
 
     res.status(401).json({ success: false, message: "Invalid credentials" });
+  });
+
+  app.get("/api/auth/me", async (req, res) => {
+    const authHeader = req.headers.authorization;
+    if (!authHeader) {
+      return res.status(401).json({ success: false, message: "No token provided" });
+    }
+    const token = authHeader.replace("Bearer ", "");
+    if (token === "admin-token") {
+      return res.json({ success: true, role: "admin", username: "admin" });
+    }
+    if (token.startsWith("customer-token-")) {
+      const customerId = token.replace("customer-token-", "");
+      try {
+        const result = await db.execute({ sql: "SELECT * FROM customers WHERE id = ?", args: [customerId] });
+        const customer = result.rows[0];
+        if (customer) {
+          return res.json({
+            success: true,
+            role: "customer",
+            customerId: customer.id,
+            customerName: customer.name,
+            defaultRate: customer.default_rate,
+            customerPhone: customer.phone,
+            customerAddress: customer.address,
+            customerGender: customer.gender || 'male',
+          });
+        }
+      } catch (err) {
+        console.error("[AuthMe] DB error:", err);
+      }
+    }
+    res.status(401).json({ success: false, message: "Invalid token" });
   });
 
   // ─── OTP ────────────────────────────────────────────────────────────────────
@@ -242,6 +280,7 @@ async function startServer() {
       defaultRate: customer.default_rate,
       customerPhone: customer.phone,
       customerAddress: customer.address,
+      customerGender: customer.gender || 'male',
     });
   });
 
@@ -279,19 +318,28 @@ async function startServer() {
   });
 
   app.post("/api/customers", async (req, res) => {
-    const { name, phone, address, username, password, default_rate = 30 } = req.body;
+    const { name, phone, address, username, password, default_rate = 30, cattle_feed_reduction = 0, gender = 'male' } = req.body;
     const result = await db.execute({
-      sql: "INSERT INTO customers (name, phone, address, username, password, default_rate) VALUES (?, ?, ?, ?, ?, ?)",
-      args: [name, phone, address, username || null, password || null, default_rate],
+      sql: "INSERT INTO customers (name, phone, address, username, password, default_rate, cattle_feed_reduction, gender) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+      args: [name, phone, address, username || null, password || null, default_rate, cattle_feed_reduction, gender],
     });
     res.json({ id: result.lastInsertRowid !== undefined ? Number(result.lastInsertRowid) : null });
   });
 
   app.put("/api/customers/:id", async (req, res) => {
-    const { name, phone, address, username, password, default_rate = 30 } = req.body;
+    const { name, phone, address, username, password, default_rate = 30, cattle_feed_reduction = 0, gender = 'male' } = req.body;
     await db.execute({
-      sql: "UPDATE customers SET name = ?, phone = ?, address = ?, username = ?, password = ?, default_rate = ? WHERE id = ?",
-      args: [name, phone, address, username || null, password || null, default_rate, req.params.id],
+      sql: "UPDATE customers SET name = ?, phone = ?, address = ?, username = ?, password = ?, default_rate = ?, cattle_feed_reduction = ?, gender = ? WHERE id = ?",
+      args: [name, phone, address, username || null, password || null, default_rate, cattle_feed_reduction, gender, req.params.id],
+    });
+    res.json({ success: true });
+  });
+
+  app.put("/api/customers/:id/feed-reduction", async (req, res) => {
+    const { cattle_feed_reduction } = req.body;
+    await db.execute({
+      sql: "UPDATE customers SET cattle_feed_reduction = ? WHERE id = ?",
+      args: [cattle_feed_reduction, req.params.id],
     });
     res.json({ success: true });
   });
@@ -436,7 +484,7 @@ async function startServer() {
     const currentMonth = today.substring(0, 7);
 
     if (customerId) {
-      const [amR, pmR, revR, advR, dedR, feedR, borrR, repR] = await Promise.all([
+      const [amR, pmR, revR, advR, dedR, feedR, borrR, repR, custR] = await Promise.all([
         db.execute({ sql: "SELECT SUM(liters) as total FROM milk_entries WHERE date = ? AND shift = 'AM' AND customer_id = ?", args: [today, customerId] }),
         db.execute({ sql: "SELECT SUM(liters) as total FROM milk_entries WHERE date = ? AND shift = 'PM' AND customer_id = ?", args: [today, customerId] }),
         db.execute({ sql: "SELECT SUM(amount) as total FROM milk_entries WHERE date LIKE ? AND customer_id = ?", args: [`${currentMonth}%`, customerId] }),
@@ -445,6 +493,7 @@ async function startServer() {
         db.execute({ sql: "SELECT SUM(amount) as total FROM feed_purchases WHERE date LIKE ? AND customer_id = ?", args: [`${currentMonth}%`, customerId] }),
         db.execute({ sql: "SELECT SUM(amount) as total FROM advances WHERE customer_id = ? AND type = 'advance'", args: [customerId] }),
         db.execute({ sql: "SELECT SUM(amount) as total FROM advances WHERE customer_id = ? AND type = 'deduction'", args: [customerId] }),
+        db.execute({ sql: "SELECT cattle_feed_reduction FROM customers WHERE id = ?", args: [customerId] }),
       ]);
       const todayAM = (amR.rows[0]?.total as number) || 0;
       const todayPM = (pmR.rows[0]?.total as number) || 0;
@@ -452,15 +501,17 @@ async function startServer() {
       const monthlyAdvances = (advR.rows[0]?.total as number) || 0;
       const monthlyDeductions = (dedR.rows[0]?.total as number) || 0;
       const monthlyFeed = (feedR.rows[0]?.total as number) || 0;
+      const cattle_feed_reduction = (custR.rows[0]?.cattle_feed_reduction as number) || 0;
       const advanceBalance = ((borrR.rows[0]?.total as number) || 0) - ((repR.rows[0]?.total as number) || 0);
       return res.json({
         todaySupply: todayAM + todayPM, todayAM, todayPM,
         monthlyRevenue, monthlyAdvances, monthlyDeductions, monthlyFeed,
-        advanceBalance, pendingPayments: Math.max(0, monthlyRevenue - monthlyDeductions - monthlyFeed),
+        cattle_feed_reduction,
+        advanceBalance, pendingPayments: Math.max(0, monthlyRevenue - monthlyDeductions - cattle_feed_reduction),
       });
     }
 
-    const [custR, amR, pmR, revR, advR, dedR, feedR, borrR, repR] = await Promise.all([
+    const [custR, amR, pmR, revR, advR, dedR, feedR, borrR, repR, redR] = await Promise.all([
       db.execute("SELECT COUNT(*) as count FROM customers"),
       db.execute({ sql: "SELECT SUM(liters) as total FROM milk_entries WHERE date = ? AND shift = 'AM'", args: [today] }),
       db.execute({ sql: "SELECT SUM(liters) as total FROM milk_entries WHERE date = ? AND shift = 'PM'", args: [today] }),
@@ -470,20 +521,23 @@ async function startServer() {
       db.execute({ sql: "SELECT SUM(amount) as total FROM feed_purchases WHERE date LIKE ?", args: [`${currentMonth}%`] }),
       db.execute("SELECT SUM(amount) as total FROM advances WHERE type = 'advance'"),
       db.execute("SELECT SUM(amount) as total FROM advances WHERE type = 'deduction'"),
+      db.execute("SELECT SUM(cattle_feed_reduction) as total FROM customers"),
     ]);
     const todayAM = (amR.rows[0]?.total as number) || 0;
     const todayPM = (pmR.rows[0]?.total as number) || 0;
     const monthlyRevenue = (revR.rows[0]?.total as number) || 0;
     const monthlyDeductions = (dedR.rows[0]?.total as number) || 0;
     const monthlyFeed = (feedR.rows[0]?.total as number) || 0;
+    const cattle_feed_reduction = (redR.rows[0]?.total as number) || 0;
     res.json({
       totalCustomers: (custR.rows[0]?.count as number) || 0,
       todaySupply: todayAM + todayPM, todayAM, todayPM,
       monthlyRevenue,
       monthlyAdvances: (advR.rows[0]?.total as number) || 0,
       monthlyDeductions, monthlyFeed,
+      cattle_feed_reduction,
       totalAdvanceBalance: ((borrR.rows[0]?.total as number) || 0) - ((repR.rows[0]?.total as number) || 0),
-      pendingPayments: Math.max(0, monthlyRevenue - monthlyDeductions - monthlyFeed),
+      pendingPayments: Math.max(0, monthlyRevenue - monthlyDeductions - cattle_feed_reduction),
     });
   });
 
@@ -492,7 +546,7 @@ async function startServer() {
     const month = req.params.month;
     const result = await db.execute({
       sql: `SELECT
-              c.id as customer_id, c.name,
+              c.id as customer_id, c.name, COALESCE(c.cattle_feed_reduction, 0) as cattle_feed_reduction,
               COALESCE(SUM(e.liters), 0) as total_liters,
               COALESCE(SUM(e.amount), 0) as total_amount,
               COALESCE((SELECT SUM(amount) FROM advances WHERE customer_id = c.id AND date LIKE ? AND type = 'advance'), 0) as total_advance,
@@ -505,10 +559,15 @@ async function startServer() {
             GROUP BY c.id`,
       args: [`${month}%`, `${month}%`, `${month}%`, `${month}%`],
     });
-    const processedBilling = result.rows.map((b: any) => ({
-      ...b,
-      final_payable: Math.max(0, b.total_amount - b.total_deduction - b.total_feed),
-    }));
+    const processedBilling = result.rows.map((b: any) => {
+      const net_cattle_feed = Math.max(0, b.total_feed - b.cattle_feed_reduction);
+      return {
+        ...b,
+        net_cattle_feed,
+        remaining_feed_balance: net_cattle_feed, // Formula: Net Cattle Feed - Amount Already Reduced (0)
+        final_payable: Math.max(0, b.total_amount - b.total_deduction - b.cattle_feed_reduction),
+      };
+    });
     res.json(processedBilling);
   });
 

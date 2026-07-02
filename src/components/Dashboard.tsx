@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Users, Milk, TrendingUp, AlertCircle, Package, Wallet } from 'lucide-react';
+import { useTranslation } from '../i18n';
 import { Stats } from '../types';
 
 interface DashboardProps {
@@ -9,6 +10,7 @@ interface DashboardProps {
 
 export default function Dashboard({ customerId, onNavigate }: DashboardProps) {
   const [stats, setStats] = useState<Stats | null>(null);
+  const { t } = useTranslation();
 
   useEffect(() => {
     const url = customerId ? `/api/stats?customerId=${customerId}` : '/api/stats';
@@ -20,17 +22,17 @@ export default function Dashboard({ customerId, onNavigate }: DashboardProps) {
   if (!stats) return <div className="animate-pulse">Loading stats...</div>;
 
   const statCards = [
-    ...(customerId ? [] : [{ label: 'Total Customers', value: stats.totalCustomers, icon: Users, color: 'bg-blue-500' }]),
+    ...(customerId ? [] : [{ label: t('totalCustomers'), value: stats.totalCustomers, icon: Users, color: 'bg-blue-500' }]),
     { 
-      label: "Today's Supply", 
+      label: t('todaysSupply'), 
       value: `${stats.todaySupply} L`, 
       icon: Milk, 
       color: 'bg-emerald-500',
       subtext: `AM: ${stats.todayAM}L | PM: ${stats.todayPM}L`
     },
-    { label: 'Feed Charges', value: `₹${stats.monthlyFeed || 0}`, icon: Package, color: 'bg-orange-500' },
-    { label: customerId ? 'Gross Earnings' : 'Monthly Revenue', value: `₹${stats.monthlyRevenue}`, icon: TrendingUp, color: 'bg-violet-500' },
-    { label: customerId ? 'Net Settlement' : 'Pending Payments', value: `₹${stats.pendingPayments}`, icon: AlertCircle, color: 'bg-amber-500' },
+    { label: t('feedCharges'), value: `₹${stats.monthlyFeed || 0}`, icon: Package, color: 'bg-orange-500' },
+    { label: customerId ? t('monthlyRevenue') : t('monthlyRevenue'), value: `₹${stats.monthlyRevenue}`, icon: TrendingUp, color: 'bg-violet-500' },
+    { label: customerId ? t('pendingPayments') : t('pendingPayments'), value: `₹${stats.pendingPayments}`, icon: AlertCircle, color: 'bg-amber-500' },
   ];
 
   return (
@@ -39,18 +41,22 @@ export default function Dashboard({ customerId, onNavigate }: DashboardProps) {
         <div>
           <div className="flex items-center gap-3 mb-2 md:mb-3">
             <span className="px-3 py-1 bg-emerald-100 text-emerald-700 text-[10px] font-black rounded-full uppercase tracking-[0.15em]">
-              {customerId ? 'Customer Portal' : 'Administrator Control'}
+              {customerId ? t('monitor') : t('administratorControl')}
             </span>
           </div>
           <h2 className="text-3xl md:text-5xl font-display font-bold text-slate-900 tracking-tight leading-none mb-2 md:mb-3">
-            Pulse <span className="text-emerald-600">Overview</span>
+            {t('pulseOverview') ? (
+              <>{t('pulseOverview')}</>
+            ) : (
+              <>Pulse <span className="text-emerald-600">Overview</span></>
+            )}
           </h2>
           <p className="text-slate-500 font-medium max-w-md text-sm md:text-base">
-            {customerId ? "Real-time metrics for your dairy supply and financial standing." : "Comprehensive control over dairy operations and customer relationships."}
+            {customerId ? "Real-time metrics for your dairy supply and financial standing." : t('administratorControl')}
           </p>
         </div>
         <div className="bg-white px-4 py-2 md:px-6 md:py-3 rounded-[1.2rem] border border-slate-100 shadow-soft">
-          <p className="text-xs text-slate-400 font-bold uppercase tracking-widest mb-0.5 md:mb-1">Observation Date</p>
+          <p className="text-xs text-slate-400 font-bold uppercase tracking-widest mb-0.5 md:mb-1">{t('observationDate')}</p>
           <p className="text-sm font-black text-slate-900">{new Date().toLocaleDateString('en-IN', { weekday: 'long', month: 'long', day: 'numeric' })}</p>
         </div>
       </div>

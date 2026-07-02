@@ -6,6 +6,8 @@ export interface Customer {
   username?: string;
   password?: string;
   default_rate?: number;
+  cattle_feed_reduction?: number;
+  gender?: 'male' | 'female';
   created_at: string;
 }
 
@@ -57,6 +59,7 @@ export interface Stats {
   todayPM: number;
   monthlyRevenue: number;
   monthlyFeed?: number;
+  cattle_feed_reduction?: number;
   pendingPayments: number;
 }
 
@@ -66,6 +69,12 @@ export interface BillingRecord {
   total_liters: number;
   total_amount: number;
   total_advance: number;
+  total_deduction: number;
   total_feed: number;
+  cattle_feed_reduction: number;
+  net_cattle_feed: number;
+  remaining_feed_balance: number;
   final_payable: number;
+  advance_balance: number;
 }
+

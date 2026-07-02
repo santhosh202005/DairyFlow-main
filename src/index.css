@@ -12,6 +12,24 @@
 @layer base {
   body {
     @apply bg-[#F9FAFB] text-slate-900 antialiased selection:bg-emerald-100 selection:text-emerald-900;
+    /* Prevent horizontal overflow on mobile */
+    overflow-x: hidden;
+    -webkit-text-size-adjust: 100%;
+  }
+
+  * {
+    box-sizing: border-box;
+  }
+
+  /* Better tap highlight on mobile */
+  button, a, [role="button"] {
+    -webkit-tap-highlight-color: transparent;
+    touch-action: manipulation;
+  }
+
+  /* Smooth scroll */
+  html {
+    scroll-behavior: smooth;
   }
 }
 
@@ -20,10 +38,109 @@
 }
 
 .bento-card {
-  @apply bg-white rounded-[1.5rem] md:rounded-[2rem] border border-slate-100 p-4 md:p-6 transition-all duration-300 hover:shadow-medium hover:scale-[1.01];
+  @apply bg-white rounded-2xl md:rounded-[2rem] border border-slate-100 p-4 md:p-6 transition-all duration-300 hover:shadow-medium hover:scale-[1.01];
 }
 
 /* Safe area inset for iOS home bar */
 .safe-area-inset-bottom {
   padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+/* ── Mobile Table → Card Utility ─────────────────────────────── */
+/* Wrapper: makes table horizontally scrollable on mobile */
+.table-scroll-wrapper {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  border-radius: 1rem;
+}
+
+/* Compact table row heights on mobile */
+@media (max-width: 768px) {
+  .mobile-compact-table th {
+    padding: 10px 12px;
+    font-size: 11px;
+  }
+
+  .mobile-compact-table td {
+    padding: 10px 12px;
+    font-size: 12px;
+  }
+}
+
+/* ── Mobile Card Row (row-as-card on xs screens) ─────────────── */
+.mobile-card-row {
+  @apply hidden;
+}
+
+@media (max-width: 540px) {
+  .mobile-card-row {
+    @apply flex flex-col gap-3;
+  }
+  .mobile-hide-xs {
+    @apply hidden;
+  }
+}
+
+/* ── Bottom Nav Safe Spacing ─────────────────────────────────── */
+.mobile-bottom-padding {
+  padding-bottom: calc(72px + env(safe-area-inset-bottom, 0px));
+}
+
+@media (min-width: 769px) {
+  .mobile-bottom-padding {
+    padding-bottom: 2.5rem;
+  }
+}
+
+/* ── Modal: always fits on small screens ─────────────────────── */
+.modal-scroll {
+  max-height: calc(100dvh - 2rem);
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* ── Page title sizes ────────────────────────────────────────── */
+.page-title {
+  @apply text-[20px] md:text-4xl lg:text-5xl font-display font-bold text-slate-900 tracking-tight leading-tight;
+}
+
+.section-heading {
+  @apply text-[16px] md:text-2xl font-display font-bold text-slate-900 tracking-tight;
+}
+
+/* ── Smooth animations ───────────────────────────────────────── */
+@keyframes slideUp {
+  from { opacity: 0; transform: translateY(12px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.animate-slide-up {
+  animation: slideUp 0.25s ease-out both;
+}
+
+/* ── Pill badge ──────────────────────────────────────────────── */
+.mobile-badge {
+  @apply px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider;
+}
+
+/* ── Full-width action button (mobile) ───────────────────────── */
+.btn-mobile-full {
+  @apply w-full flex items-center justify-center gap-2 py-3 rounded-xl font-bold text-sm transition-all active:scale-95;
+}
+
+/* ── Compact stat pill ───────────────────────────────────────── */
+.stat-pill {
+  @apply flex flex-col items-center px-3 py-2 rounded-xl bg-slate-50 border border-slate-100;
+}
+
+/* ── Input base ──────────────────────────────────────────────── */
+.input-base {
+  @apply w-full px-3 py-3 rounded-xl border border-slate-200 text-sm font-medium text-slate-700 bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all;
+  font-size: 14px; /* prevents zoom on iOS */
+}
+
+/* ── Touch-friendly button heights ──────────────────────────── */
+.touch-btn {
+  min-height: 44px;
+  min-width: 44px;
 }

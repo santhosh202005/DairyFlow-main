@@ -4,6 +4,9 @@
  */
 
 import { useState, useEffect } from 'react';
+import { apiFetch } from './api';
+import { clearAuth, loadStoredAuth, storeAuth } from './auth';
+
 import { 
   LayoutDashboard, 
   Users, 
@@ -23,36 +26,20 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import Dashboard from './components/Dashboard';
+import { useTranslation } from './i18n';
 
 function useIsMobile(query = '(max-width: 768px)') {
   const [isMobile, setIsMobile] = useState(() => {
-    if (typeof window !== 'undefined' && window.matchMedia) {
-      return window.matchMedia(query).matches;
-    }
-    return false;
+    if (typeof window === 'undefined') return false;
+    return window.innerWidth <= 768;
   });
 
   useEffect(() => {
-    const mql = window.matchMedia?.(query);
-    if (!mql) return;
-    const onChange = () => setIsMobile(!!mql.matches);
-    
-    if (mql.addEventListener) {
-      mql.addEventListener('change', onChange);
-    } else {
-      mql.addListener(onChange);
-    }
-
-    onChange();
-
-    return () => {
-      if (mql.removeEventListener) {
-        mql.removeEventListener('change', onChange);
-      } else {
-        mql.removeListener(onChange);
-      }
-    };
-  }, [query]);
+    if (typeof window === 'undefined') return;
+    const onResize = () => setIsMobile(window.innerWidth <= 768);
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
 
   return isMobile;
 }
@@ -70,6 +57,7 @@ export default function App() {
   const [activeView, setActiveView] = useState<View>('dashboard');
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [isProfileOpen, setIsProfileOpen] = useState(false);
+  
   const [authData, setAuthData] = useState<{
     token: string | null;
     role: string | null;
@@ -78,76 +66,284 @@ export default function App() {
     defaultRate?: number;
     customerPhone?: string;
     customerAddress?: string;
+    customerGender?: 'male' | 'female';
   }>(() => {
-    const token = localStorage.getItem('dairy_auth_token');
-    const role = localStorage.getItem('dairy_auth_role');
-    const customerId = localStorage.getItem('dairy_auth_customer_id');
-    const customerName = localStorage.getItem('dairy_auth_customer_name');
-    const defaultRate = localStorage.getItem('dairy_auth_default_rate');
-    const customerPhone = localStorage.getItem('dairy_auth_customer_phone');
-    const customerAddress = localStorage.getItem('dairy_auth_customer_address');
-    return { 
-      token, 
-      role, 
-      customerId: customerId || undefined,
-      customerName: customerName || undefined,
-      defaultRate: defaultRate ? parseFloat(defaultRate) : undefined,
-      customerPhone: customerPhone || undefined,
-      customerAddress: customerAddress || undefined
+    const stored = loadStoredAuth();
+    if (!stored) return { token: null, role: null };
+    return {
+      token: stored.token,
+      role: stored.role,
+      customerId: stored.customerId,
+      customerName: stored.customerName,
+      defaultRate: stored.defaultRate,
+      customerPhone: stored.customerPhone,
+      customerAddress: stored.customerAddress,
+      customerGender: stored.customerGender,
     };
   });
 
-  const handleLogin = (token: string, role: string, customerId?: string, customerName?: string, defaultRate?: number, customerPhone?: string, customerAddress?: string) => {
-    localStorage.setItem('dairy_auth_token', token);
-    localStorage.setItem('dairy_auth_role', role);
-    if (customerId) localStorage.setItem('dairy_auth_customer_id', customerId);
-    if (customerName) localStorage.setItem('dairy_auth_customer_name', customerName);
-    if (defaultRate) localStorage.setItem('dairy_auth_default_rate', defaultRate.toString());
-    if (customerPhone) localStorage.setItem('dairy_auth_customer_phone', customerPhone);
-    if (customerAddress) localStorage.setItem('dairy_auth_customer_address', customerAddress);
-    setAuthData({ token, role, customerId, customerName, defaultRate, customerPhone, customerAddress });
-    setActiveView('dashboard');
-    setIsProfileOpen(false);
-  };
+  // Keep `useIsMobile` call unconditional to preserve hook order across renders
+  const isMobile = useIsMobile();
+
+  const [isVerifying, setIsVerifying] = useState(true);
+  const [serverStatus, setServerStatus] = useState<'checking' | 'starting' | 'ready'>('checking');
+  const [errorMsg, setErrorMsg] = useState('');
 
   const handleLogout = () => {
-    // Clear auth storage first
-    localStorage.removeItem('dairy_auth_token');
-    localStorage.removeItem('dairy_auth_role');
-    localStorage.removeItem('dairy_auth_customer_id');
-    localStorage.removeItem('dairy_auth_customer_name');
-    localStorage.removeItem('dairy_auth_default_rate');
-    localStorage.removeItem('dairy_auth_customer_phone');
-    localStorage.removeItem('dairy_auth_customer_address');
-
-    // Also clear in-app UI state immediately so old screens don't flash
+    clearAuth();
     setActiveView('dashboard');
     setIsProfileOpen(false);
     setIsSidebarOpen(true);
-
     setAuthData({ token: null, role: null });
   };
+
+  useEffect(() => {
+    let didRun = false;
+
+    const withHardTimeout = async <T,>(promise: Promise<T>, ms: number): Promise<T> => {
+      return await new Promise<T>((resolve, reject) => {
+        const t = setTimeout(() => reject(new Error(`Hard timeout after ${ms}ms`)), ms);
+        promise
+          .then((v) => {
+            clearTimeout(t);
+            resolve(v);
+          })
+          .catch((err) => {
+            clearTimeout(t);
+            reject(err);
+          });
+      });
+    };
+
+    const redirectToLogin = (reason: string) => {
+      console.warn('[Auth] redirectToLogin:', reason);
+      clearAuth();
+      setAuthData({ token: null, role: null });
+      setActiveView('dashboard');
+      setIsProfileOpen(false);
+      setIsSidebarOpen(true);
+      setIsVerifying(false);
+    };
+
+    if (didRun) return;
+    didRun = true;
+
+    const stored = loadStoredAuth();
+    const token = stored?.token;
+
+    console.log('[Auth] Starting session verification. HasToken=', !!token);
+
+    // If no token exists, stop verifying immediately and show Login.
+    if (!token) {
+      setServerStatus('checking');
+      setIsVerifying(false);
+      setErrorMsg('');
+      console.log('[Auth] No token found. Showing login.');
+      return;
+    }
+
+    const verifySession = async (sessionToken: string) => {
+      try {
+        const data = await apiFetch<any>(
+          '/api/auth/me',
+          {
+            headers: {
+              Authorization: `Bearer ${sessionToken}`,
+            },
+          },
+          // Keep apiFetch retries, but hard-timeout the whole flow below.
+          { retries: 6, delayMs: 1000 }
+        );
+
+        if (data?.success) {
+          console.log('[Auth] Token valid.');
+          setAuthData({
+            token: sessionToken,
+            role: data.role,
+            customerId: data.customerId?.toString(),
+            customerName: data.customerName,
+            defaultRate: data.defaultRate,
+            customerPhone: data.customerPhone,
+            customerAddress: data.customerAddress,
+            customerGender: data.customerGender,
+          });
+          return true;
+        }
+
+        console.warn('[Auth] /api/auth/me responded but not success:', data);
+        return false;
+      } catch (e) {
+        console.error('[Auth] Token verification error:', e);
+        return false;
+      }
+    };
+
+    const checkServerAndSession = async () => {
+      try {
+        setServerStatus('checking');
+        setErrorMsg('');
+
+        // Run health + session verification under a single hard 10s timeout.
+        await withHardTimeout(
+          (async () => {
+            console.log('[Auth] Checking backend health...');
+            await apiFetch('/api/health', { method: 'GET' }, { retries: 6, delayMs: 1500 });
+            console.log('[Auth] Backend health OK. Verifying session...');
+            await verifySession(token);
+          })(),
+          10_000
+        );
+
+        // If verification succeeded, authData.token should be set by verifySession.
+        // If it didn't, treat as invalid/expired.
+        if (!loadStoredAuth()?.token) {
+          console.warn('[Auth] Token cleared during verification. Showing login.');
+          redirectToLogin('token cleared');
+          return;
+        }
+
+        // If verifySession didn't set authData, we still redirect to login.
+        // (Using current state is not reliable immediately, so we also accept a no-token final state.)
+        if (!token) {
+          console.warn('[Auth] No token available after verification. Showing login.');
+          redirectToLogin('no token after verification');
+          return;
+        }
+
+        console.log('[Auth] Session verification flow completed.');
+      } catch (err) {
+        const msg = String((err as any)?.message || err);
+        if (msg.includes('Hard timeout')) {
+          console.warn('[Auth] Verification timed out (backend may be sleeping).');
+          setServerStatus('starting');
+          setErrorMsg('Server is starting, please wait a few seconds...');
+          redirectToLogin('verification timeout');
+          return;
+        }
+
+        console.warn('[Auth] Backend sleeping/unavailable:', err);
+        setServerStatus('starting');
+        setErrorMsg('Server is starting, please wait a few seconds...');
+        redirectToLogin('backend unavailable');
+        return;
+      } finally {
+        // Guarantee loader off.
+        setIsVerifying(false);
+      }
+    };
+
+    checkServerAndSession();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const handleLogin = async (
+    token: string,
+    role: string,
+    customerId?: string,
+    customerName?: string,
+    defaultRate?: number,
+    customerPhone?: string,
+    customerAddress?: string,
+    customerGender?: 'male' | 'female'
+  ) => {
+    // Persist what we have immediately so navigation feels instant.
+    storeAuth({
+      token,
+      role: role as any,
+      customerId,
+      customerName,
+      defaultRate,
+      customerPhone,
+      customerAddress,
+      customerGender,
+    });
+
+    // Then fetch the authoritative session profile (so Settings/header always get full details).
+    try {
+      const me = await apiFetch<any>(
+        '/api/auth/me',
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        },
+        { retries: 6, delayMs: 1200 }
+      );
+
+      if (me?.success) {
+        setAuthData({
+          token,
+          role: me.role,
+          customerId: me.customerId?.toString(),
+          customerName: me.customerName,
+          defaultRate: me.defaultRate,
+          customerPhone: me.customerPhone,
+          customerAddress: me.customerAddress,
+          customerGender: me.customerGender,
+        });
+      } else {
+        // Fallback to the login payload if /api/auth/me doesn't return success.
+        setAuthData({ token, role, customerId, customerName, defaultRate, customerPhone, customerAddress, customerGender });
+      }
+    } catch {
+      // If backend is sleeping/slow, fallback immediately.
+      setAuthData({ token, role, customerId, customerName, defaultRate, customerPhone, customerAddress, customerGender });
+    }
+
+    setActiveView('dashboard');
+    setIsProfileOpen(false);
+  };
+
+
+  if (isVerifying) {
+    return (
+      <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
+        <div className="w-full max-w-md bg-white rounded-3xl shadow-xl border border-slate-100 p-8 text-center space-y-6">
+          <div className="w-20 h-20 bg-emerald-50 text-emerald-600 rounded-2xl flex items-center justify-center mx-auto shadow-inner relative">
+            <div className="absolute inset-0 rounded-2xl border-4 border-emerald-500/20 border-t-emerald-600 animate-spin" />
+            <img src="/logo.jpg" alt="DairyFlow Logo" className="w-14 h-14 object-cover rounded-xl" />
+          </div>
+          <div className="space-y-2">
+            <h3 className="text-xl font-display font-bold text-slate-900">
+              {serverStatus === 'starting' ? 'Connecting to Server' : 'Verifying Session'}
+            </h3>
+            <p className="text-sm text-slate-400 font-medium leading-relaxed">
+              {serverStatus === 'starting' 
+                ? 'Server is starting, please wait a few seconds...' 
+                : 'Restoring your session details, please wait...'}
+            </p>
+          </div>
+          {errorMsg && (
+            <div className="p-3 bg-rose-50 text-rose-600 text-xs font-bold rounded-xl border border-rose-100">
+              {errorMsg}
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
 
   if (!authData.token) {
     return <Login onLogin={handleLogin} />;
   }
 
-  const navItems = [
-    { id: 'dashboard', label: 'Monitor', icon: LayoutDashboard },
-    ...(authData.role === 'admin' ? [
-      { id: 'customers', label: 'Farmers', icon: Users },
-      { id: 'entries', label: 'Logistics', icon: Milk },
-      { id: 'advances', label: 'Ledger', icon: Wallet },
-      { id: 'feed', label: 'Resources', icon: Package },
-    ] : [
-      { id: 'entries', label: 'My Supply', icon: Milk },
-      { id: 'advances', label: 'My Ledger', icon: Wallet },
-      { id: 'feed', label: 'My Stocks', icon: Package },
-    ]),
-    { id: 'settings', label: 'Settings', icon: SettingsIcon },
-  ];
+  const { t } = useTranslation();
+  const navLabel = (key: string, fallback: string) => t(key) || fallback;
 
-  const isMobile = useIsMobile();
+  const navItems = [
+    { id: 'dashboard', label: navLabel('monitor', 'Monitor'), icon: LayoutDashboard },
+    ...(authData.role === 'admin' ? [
+      { id: 'customers', label: navLabel('farmers', 'Farmers'), icon: Users },
+      { id: 'entries', label: navLabel('logistics', 'Logistics'), icon: Milk },
+      { id: 'advances', label: navLabel('ledger', 'Ledger'), icon: Wallet },
+      { id: 'feed', label: navLabel('resources', 'Resources'), icon: Package },
+    ] : [
+      { id: 'entries', label: navLabel('mySupply', 'My Supply'), icon: Milk },
+      { id: 'advances', label: navLabel('myLedger', 'My Ledger'), icon: Wallet },
+      { id: 'feed', label: navLabel('myStocks', 'My Stocks'), icon: Package },
+    ]),
+    { id: 'settings', label: navLabel('settings', 'Settings'), icon: SettingsIcon },
+  ];
 
   return (
     <div className="min-h-screen bg-[#F9FAFB] flex font-sans text-slate-900">
@@ -217,12 +413,18 @@ export default function App() {
 
       {/* Main Content */}
       <main className="flex-1 overflow-auto relative glass-card flex flex-col">
-        <header className="bg-white/90 backdrop-blur-xl border-b border-slate-100 px-4 py-4 md:px-10 md:py-6 sticky top-0 z-30 flex justify-between items-center shadow-soft">
-          <h1 className="text-xl md:text-3xl font-display font-bold text-slate-900 tracking-tight capitalize">
-            {activeView.replace('-', ' ')}
+        <header className="bg-white/90 backdrop-blur-xl border-b border-slate-100 px-3 py-3 md:px-10 md:py-5 sticky top-0 z-30 flex justify-between items-center shadow-soft">
+          <h1 className="text-[17px] md:text-3xl font-display font-bold text-slate-900 tracking-tight capitalize truncate max-w-[55vw] md:max-w-none">
+            {activeView === 'dashboard' ? t('dashboard') 
+              : activeView === 'customers' ? t('farmers')
+              : activeView === 'entries' ? t('milkSupply')
+              : activeView === 'advances' ? t('advances')
+              : activeView === 'feed' ? t('cattleFeed')
+              : activeView === 'settings' ? t('settings')
+              : (activeView as string).replace('-', ' ')}
           </h1>
           
-          <div className="flex items-center gap-6 relative">
+          <div className="flex items-center gap-2 md:gap-6 relative">
             <div className="text-right hidden sm:block">
               <p className="text-sm font-bold text-slate-900 leading-none mb-1">{authData.role === 'admin' ? 'Administrator' : authData.customerName}</p>
               <span className="inline-block px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 text-[10px] font-black uppercase tracking-wider">
@@ -231,10 +433,10 @@ export default function App() {
             </div>
             <div 
               onClick={() => setIsProfileOpen(!isProfileOpen)}
-              className="w-12 h-12 rounded-2xl bg-white border-2 border-slate-100 shadow-soft overflow-hidden p-1 transition-transform hover:scale-105 cursor-pointer relative z-50"
+              className="w-10 h-10 md:w-12 md:h-12 rounded-xl md:rounded-2xl bg-white border-2 border-slate-100 shadow-soft overflow-hidden p-0.5 md:p-1 transition-transform hover:scale-105 cursor-pointer relative z-50 touch-btn flex items-center justify-center"
             >
               <img 
-                src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${authData.role === 'admin' ? 'dairy' : authData.customerId}`} 
+                src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${authData.role === 'admin' ? 'dairy' : authData.customerId}&gender=${authData.customerGender || 'male'}`} 
                 alt="Profile" 
                 className="w-full h-full rounded-xl object-cover"
                 referrerPolicy="no-referrer"
@@ -255,9 +457,9 @@ export default function App() {
                     className="absolute top-16 right-0 w-64 bg-white rounded-2xl shadow-xl border border-slate-100 overflow-hidden z-50"
                   >
                     <div className="p-4 border-b border-slate-50 bg-slate-50/50">
-                      <p className="font-bold text-slate-900">{authData.role === 'admin' ? 'Administrator' : authData.customerName}</p>
+                      <p className="font-bold text-slate-900">{authData.role === 'admin' ? t('administrator') : authData.customerName}</p>
                       <p className="text-xs text-slate-500 font-medium">
-                        {authData.role === 'admin' ? 'System Owner' : `Farmer ID: #${authData.customerId}`}
+                        {authData.role === 'admin' ? t('systemOwner') : `Farmer ID: #${authData.customerId}`}
                       </p>
                       {authData.defaultRate && (
                         <p className="text-xs text-emerald-600 font-bold mt-1">
@@ -290,7 +492,7 @@ export default function App() {
                         className="w-full flex items-center gap-3 px-3 py-2.5 text-sm font-medium text-slate-600 hover:text-emerald-600 hover:bg-emerald-50 rounded-xl transition-colors cursor-pointer"
                       >
                         <User size={16} />
-                        My Profile
+                        {t('myProfile')}
                       </button>
                       <button 
                         onClick={() => {
@@ -300,7 +502,7 @@ export default function App() {
                         className="w-full flex items-center gap-3 px-3 py-2.5 text-sm font-medium text-slate-600 hover:text-emerald-600 hover:bg-emerald-50 rounded-xl transition-colors cursor-pointer"
                       >
                         <SettingsIcon size={16} />
-                        Account Settings
+                        {t('accountSettings')}
                       </button>
                     </div>
                     <div className="p-2 border-t border-slate-50">
@@ -312,7 +514,7 @@ export default function App() {
                         className="w-full flex items-center gap-3 px-3 py-2.5 text-sm font-medium text-rose-600 hover:bg-rose-50 rounded-xl transition-colors"
                       >
                         <LogOut size={16} />
-                        Sign Out
+                        {t('signOut')}
                       </button>
                     </div>
                   </motion.div>
@@ -322,7 +524,7 @@ export default function App() {
           </div>
         </header>
 
-        <div className="p-4 md:p-10 max-w-7xl mx-auto flex-1 pb-24 md:pb-10">
+        <div className="p-3 md:p-10 max-w-7xl mx-auto flex-1 mobile-bottom-padding">
           <AnimatePresence mode="wait">
             <motion.div
               key={activeView}
@@ -348,8 +550,8 @@ export default function App() {
 
       {/* Mobile Bottom Navigation */}
       {isMobile && (
-        <nav className="fixed bottom-0 left-0 right-0 z-50 bg-white/95 backdrop-blur-xl border-t border-slate-100 shadow-[0_-4px_24px_rgba(0,0,0,0.06)] safe-area-inset-bottom">
-          <div className="flex items-stretch overflow-x-auto">
+        <nav className="fixed bottom-0 left-0 right-0 z-50 bg-white/98 backdrop-blur-xl border-t border-slate-100 shadow-[0_-4px_24px_rgba(0,0,0,0.08)] safe-area-inset-bottom">
+          <div className="flex items-stretch">
             {navItems.map((item) => {
               const Icon = item.icon;
               const isActive = activeView === item.id;
@@ -357,7 +559,7 @@ export default function App() {
                 <button
                   key={item.id}
                   onClick={() => setActiveView(item.id as View)}
-                  className={`flex-1 min-w-0 flex flex-col items-center justify-center py-2 px-1 transition-all relative ${
+                  className={`flex-1 min-w-0 flex flex-col items-center justify-center py-2.5 px-1 transition-all relative touch-btn ${
                     isActive ? 'text-emerald-600' : 'text-slate-400'
                   }`}
                 >
@@ -368,9 +570,13 @@ export default function App() {
                       transition={{ type: 'spring', stiffness: 400, damping: 30 }}
                     />
                   )}
-                  <Icon size={20} className="relative z-10 transition-transform" style={{ transform: isActive ? 'scale(1.15)' : 'scale(1)' }} />
-                  <span className={`relative z-10 text-[10px] font-bold mt-0.5 truncate w-full text-center leading-none ${
-                    isActive ? 'text-emerald-600' : 'text-slate-400'
+                  <Icon
+                    size={isActive ? 22 : 20}
+                    className="relative z-10 transition-all duration-200"
+                    strokeWidth={isActive ? 2.5 : 2}
+                  />
+                  <span className={`relative z-10 mt-1 truncate w-full text-center leading-none font-bold ${
+                    isActive ? 'text-[11px] text-emerald-600' : 'text-[10px] text-slate-400'
                   }`}>{item.label}</span>
                 </button>
               );

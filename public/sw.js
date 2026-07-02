@@ -1,4 +1,5 @@
-const CACHE_NAME = 'dairyflow-v2';
+// Bump this value to force clients to update cached assets
+const CACHE_NAME = 'dairyflow-v3';
 const STATIC_ASSETS = [
   '/',
   '/index.html',

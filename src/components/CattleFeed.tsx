@@ -9,7 +9,7 @@ interface CattleFeedProps {
 }
 
 export default function CattleFeed({ customerId, isAdmin = true }: CattleFeedProps) {
-  const [activeTab, setActiveTab] = useState<'purchases' | 'types'>(isAdmin ? 'purchases' : 'purchases');
+  const [activeTab, setActiveTab] = useState<'purchases' | 'reductions' | 'types'>('purchases');
   const [feedTypes, setFeedTypes] = useState<FeedType[]>([]);
   const [purchases, setPurchases] = useState<FeedPurchase[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
@@ -86,10 +86,8 @@ export default function CattleFeed({ customerId, isAdmin = true }: CattleFeedPro
 
     if (response.ok) {
       const data = await response.json();
-      
       const customer = customers.find(c => c.id.toString() === purchaseFormData.customer_id);
       const customerName = customer ? customer.name : '';
-      
       const feedType = feedTypes.find(t => t.id.toString() === purchaseFormData.feed_type_id);
       const feedName = feedType ? feedType.name : '';
       const rate = feedType ? feedType.rate : 0;
@@ -148,280 +146,494 @@ export default function CattleFeed({ customerId, isAdmin = true }: CattleFeedPro
     }
   };
 
+  const handleReductionChange = async (id: string, val: string) => {
+    const valFloat = parseFloat(val) || 0;
+    setCustomers(prev => prev.map(c => c.id.toString() === id ? { ...c, cattle_feed_reduction: valFloat } : c));
+    try {
+      await fetch(`/api/customers/${id}/feed-reduction`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ cattle_feed_reduction: valFloat })
+      });
+    } catch (err) {
+      alert('Error saving reduction amount');
+    }
+  };
+
+  // Helper to calculate total feed purchase for any customer
+  const getCustomerTotalFeed = (custId: string) => {
+    return purchases
+      .filter(p => p.customer_id.toString() === custId.toString())
+      .reduce((sum, p) => sum + p.amount, 0);
+  };
+
   return (
-    <div className="space-y-6">
-      <div className="flex flex-col md:flex-row justify-between items-center gap-4">
-        <div className="flex bg-slate-100 p-1 rounded-xl">
+    <div className="space-y-4 md:space-y-6">
+      {/* Tab bar + Add button */}
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex bg-slate-100 p-1 rounded-xl self-start">
           <button
             onClick={() => setActiveTab('purchases')}
-            className={`px-6 py-2 rounded-lg text-sm font-bold transition-all ${
+            className={`px-4 py-2 rounded-lg text-xs md:text-sm font-bold transition-all touch-btn ${
               activeTab === 'purchases' ? 'bg-white text-emerald-700 shadow-sm' : 'text-slate-500'
             }`}
           >
             Feed Purchases
           </button>
           {isAdmin && (
-            <button
-              onClick={() => setActiveTab('types')}
-              className={`px-6 py-2 rounded-lg text-sm font-bold transition-all ${
-                activeTab === 'types' ? 'bg-white text-emerald-700 shadow-sm' : 'text-slate-500'
-              }`}
-            >
-              Feed Inventory
-            </button>
+            <>
+              <button
+                onClick={() => setActiveTab('reductions')}
+                className={`px-4 py-2 rounded-lg text-xs md:text-sm font-bold transition-all touch-btn ${
+                  activeTab === 'reductions' ? 'bg-white text-emerald-700 shadow-sm' : 'text-slate-500'
+                }`}
+              >
+                Reductions
+              </button>
+              <button
+                onClick={() => setActiveTab('types')}
+                className={`px-4 py-2 rounded-lg text-xs md:text-sm font-bold transition-all touch-btn ${
+                  activeTab === 'types' ? 'bg-white text-emerald-700 shadow-sm' : 'text-slate-500'
+                }`}
+              >
+                Inventory
+              </button>
+            </>
           )}
         </div>
 
-        {isAdmin && (
+        {isAdmin && activeTab !== 'reductions' && (
           <button
             onClick={() => activeTab === 'purchases' ? setIsPurchaseModalOpen(true) : setIsTypeModalOpen(true)}
-            className="flex items-center gap-2 bg-emerald-600 text-white px-6 py-2 rounded-xl hover:bg-emerald-700 transition-colors shadow-sm w-full md:w-auto justify-center"
+            className="flex items-center justify-center gap-2 bg-emerald-600 text-white px-5 py-3 rounded-xl hover:bg-emerald-700 transition-colors shadow-sm font-bold text-sm touch-btn w-full sm:w-auto"
           >
-            <Plus size={20} />
+            <Plus size={18} />
             {activeTab === 'purchases' ? 'Record Purchase' : 'Add Feed Type'}
           </button>
         )}
       </div>
 
       <AnimatePresence mode="wait">
-        {activeTab === 'purchases' ? (
+        {activeTab === 'purchases' && (
           <motion.div
             key="purchases"
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -10 }}
-            className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden"
           >
-            <table className="w-full text-left border-collapse">
-              <thead>
-                <tr className="bg-slate-50 border-b border-slate-100">
-                  <th className="p-4 font-semibold text-slate-600 text-sm uppercase tracking-wider">Date</th>
-                  {isAdmin && <th className="p-4 font-semibold text-slate-600 text-sm uppercase tracking-wider">Customer</th>}
-                  <th className="p-4 font-semibold text-slate-600 text-sm uppercase tracking-wider">Feed Name</th>
-                  <th className="p-4 font-semibold text-slate-600 text-sm uppercase tracking-wider">Quantity</th>
-                  <th className="p-4 font-semibold text-slate-600 text-sm uppercase tracking-wider">Total Cost</th>
-                  {isAdmin && <th className="p-4 font-semibold text-slate-600 text-sm uppercase tracking-wider text-right">Actions</th>}
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {purchases.map((p) => (
-                  <tr key={p.id} className="hover:bg-slate-50 transition-colors">
-                    <td className="p-4 text-slate-600">{p.date}</td>
-                    {isAdmin && <td className="p-4 font-medium text-slate-900">{p.customer_name}</td>}
-                    <td className="p-4 text-slate-900">{p.feed_name}</td>
-                    <td className="p-4 text-slate-600 font-medium">{p.quantity} Units</td>
-                    <td className="p-4 text-orange-600 font-bold">₹{p.amount.toFixed(2)}</td>
-                    {isAdmin && (
-                      <td className="p-4 text-right">
+            {/* Desktop table */}
+            <div className="bg-white rounded-2xl shadow-soft border border-slate-100 overflow-hidden hidden sm:block">
+              <div className="overflow-x-auto">
+                <table className="w-full text-left border-collapse mobile-compact-table">
+                  <thead>
+                    <tr className="bg-slate-50 border-b border-slate-100">
+                      <th className="p-3 md:p-4 font-semibold text-slate-600 text-[11px] md:text-sm uppercase tracking-wider">Date</th>
+                      {isAdmin && <th className="p-3 md:p-4 font-semibold text-slate-600 text-[11px] md:text-sm uppercase tracking-wider">Customer</th>}
+                      <th className="p-3 md:p-4 font-semibold text-slate-600 text-[11px] md:text-sm uppercase tracking-wider">Feed</th>
+                      <th className="p-3 md:p-4 font-semibold text-slate-600 text-[11px] md:text-sm uppercase tracking-wider">Qty</th>
+                      <th className="p-3 md:p-4 font-semibold text-slate-600 text-[11px] md:text-sm uppercase tracking-wider">Amount</th>
+                      {isAdmin && <th className="p-3 md:p-4 font-semibold text-slate-600 text-[11px] md:text-sm uppercase tracking-wider text-right">Del</th>}
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {purchases.map((p) => (
+                      <tr key={p.id} className="hover:bg-slate-50 transition-colors group">
+                        <td className="p-3 md:p-4 text-slate-600 text-xs md:text-sm">{p.date}</td>
+                        {isAdmin && <td className="p-3 md:p-4 font-medium text-slate-900 text-xs md:text-sm">{p.customer_name}</td>}
+                        <td className="p-3 md:p-4 text-slate-900 text-xs md:text-sm">{p.feed_name}</td>
+                        <td className="p-3 md:p-4 text-slate-600 font-medium text-xs md:text-sm">{p.quantity} U</td>
+                        <td className="p-3 md:p-4 text-orange-600 font-bold text-xs md:text-sm">₹{p.amount.toFixed(0)}</td>
+                        {isAdmin && (
+                          <td className="p-3 md:p-4 text-right">
+                            <button
+                              onClick={() => handleDeletePurchase(p.id)}
+                              className="p-1.5 md:p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors opacity-0 group-hover:opacity-100 touch-btn"
+                            >
+                              <Trash2 size={15} />
+                            </button>
+                          </td>
+                        )}
+                      </tr>
+                    ))}
+                    {purchases.length === 0 && (
+                      <tr>
+                        <td colSpan={isAdmin ? 6 : 4} className="p-8 text-center text-slate-400 italic text-sm">
+                          No feed purchases recorded.
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {/* Mobile card list */}
+            <div className="sm:hidden space-y-2.5">
+              {purchases.length === 0 && (
+                <div className="bg-white rounded-2xl border border-slate-100 p-8 text-center">
+                  <div className="w-12 h-12 rounded-xl bg-orange-50 flex items-center justify-center text-orange-200 mx-auto mb-3">
+                    <Package size={24} />
+                  </div>
+                  <p className="text-sm font-bold text-slate-400">No Purchases</p>
+                  <p className="text-xs text-slate-300 mt-1">Tap "Record Purchase" to log cattle feed.</p>
+                </div>
+              )}
+              {purchases.map((p) => (
+                <motion.div
+                  key={p.id}
+                  initial={{ opacity: 0, y: 6 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="bg-white rounded-xl border border-slate-100 p-3.5 shadow-soft"
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="flex items-start gap-2.5">
+                      <div className="w-9 h-9 rounded-xl bg-orange-50 flex items-center justify-center text-orange-500 flex-shrink-0">
+                        <Package size={16} />
+                      </div>
+                      <div>
+                        <p className="text-sm font-bold text-slate-900">{p.feed_name}</p>
+                        <div className="flex items-center gap-2 mt-0.5">
+                          <span className="text-[10px] text-slate-400">{p.date}</span>
+                          {isAdmin && <span className="text-[10px] text-slate-400">· {p.customer_name}</span>}
+                        </div>
+                        <p className="text-[11px] text-slate-500 mt-0.5">{p.quantity} Units</p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2 flex-shrink-0">
+                      <p className="text-base font-display font-black text-orange-600">₹{p.amount.toFixed(0)}</p>
+                      {isAdmin && (
                         <button
                           onClick={() => handleDeletePurchase(p.id)}
-                          className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                          className="p-1.5 rounded-lg text-rose-400 hover:bg-rose-50 transition-colors touch-btn"
                         >
-                          <Trash2 size={18} />
+                          <Trash2 size={14} />
                         </button>
-                      </td>
-                    )}
-                  </tr>
-                ))}
-                {purchases.length === 0 && (
-                  <tr>
-                    <td colSpan={isAdmin ? 6 : 4} className="p-8 text-center text-slate-400 italic">
-                      No feed purchases recorded.
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
+                      )}
+                    </div>
+                  </div>
+                </motion.div>
+              ))}
+            </div>
           </motion.div>
-        ) : (
+        )}
+
+        {activeTab === 'reductions' && (
+          <motion.div
+            key="reductions"
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -10 }}
+            className="space-y-4"
+          >
+            {/* Desktop reduction table */}
+            <div className="bg-white rounded-2xl shadow-soft border border-slate-100 overflow-hidden hidden sm:block">
+              <div className="overflow-x-auto">
+                <table className="w-full text-left border-collapse mobile-compact-table">
+                  <thead>
+                    <tr className="bg-slate-50 border-b border-slate-100">
+                      <th className="p-3 md:p-4 font-semibold text-slate-600 text-[11px] md:text-sm uppercase tracking-wider">Customer Name</th>
+                      <th className="p-3 md:p-4 font-semibold text-slate-600 text-[11px] md:text-sm uppercase tracking-wider">Total Cattle Feed</th>
+                      <th className="p-3 md:p-4 font-semibold text-slate-600 text-[11px] md:text-sm uppercase tracking-wider">Cattle Feed Reduction</th>
+                      <th className="p-3 md:p-4 font-semibold text-slate-600 text-[11px] md:text-sm uppercase tracking-wider">Net Cattle Feed</th>
+                      <th className="p-3 md:p-4 font-semibold text-slate-600 text-[11px] md:text-sm uppercase tracking-wider">Remaining Balance</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {customers.map((c) => {
+                      const totalFeed = getCustomerTotalFeed(c.id);
+                      const reduction = c.cattle_feed_reduction || 0;
+                      const netFeed = Math.max(0, totalFeed - reduction);
+                      const remainingBalance = netFeed;
+                      return (
+                        <tr key={c.id} className="hover:bg-slate-50 transition-colors">
+                          <td className="p-3 md:p-4 font-bold text-slate-900 text-xs md:text-sm">{c.name}</td>
+                          <td className="p-3 md:p-4 text-slate-600 text-xs md:text-sm">₹{totalFeed.toFixed(2)}</td>
+                          <td className="p-3 md:p-4">
+                            <div className="relative max-w-[120px]">
+                              <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 text-xs">₹</span>
+                              <input
+                                type="number"
+                                step="any"
+                                value={reduction || ''}
+                                onChange={(e) => handleReductionChange(c.id.toString(), e.target.value)}
+                                className="w-full pl-6 pr-2 py-1 border border-slate-200 rounded-lg text-xs font-bold text-slate-800 outline-none focus:ring-1 focus:ring-emerald-500/20 focus:border-emerald-500"
+                                placeholder="0.00"
+                              />
+                            </div>
+                          </td>
+                          <td className="p-3 md:p-4 text-emerald-600 font-bold text-xs md:text-sm">₹{netFeed.toFixed(2)}</td>
+                          <td className="p-3 md:p-4 text-orange-600 font-bold text-xs md:text-sm">₹{remainingBalance.toFixed(2)}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {/* Mobile reduction cards */}
+            <div className="sm:hidden space-y-2.5">
+              {customers.map((c) => {
+                const totalFeed = getCustomerTotalFeed(c.id);
+                const reduction = c.cattle_feed_reduction || 0;
+                const netFeed = Math.max(0, totalFeed - reduction);
+                const remainingBalance = netFeed;
+                return (
+                  <div key={c.id} className="bg-white rounded-xl border border-slate-100 p-4 shadow-soft space-y-3">
+                    <div className="flex justify-between items-center border-b border-slate-50 pb-2">
+                      <p className="font-bold text-slate-900 text-sm">{c.name}</p>
+                      <span className="text-[10px] bg-slate-100 px-2 py-0.5 rounded text-slate-500">ID: #{c.id}</span>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2 text-xs">
+                      <div>
+                        <p className="text-slate-400 text-[10px] uppercase font-black tracking-wider">Total Feed</p>
+                        <p className="font-bold text-slate-700">₹{totalFeed.toFixed(0)}</p>
+                      </div>
+                      <div>
+                        <p className="text-emerald-500 text-[10px] uppercase font-black tracking-wider">Net Feed</p>
+                        <p className="font-bold text-emerald-600">₹{netFeed.toFixed(0)}</p>
+                      </div>
+                      <div className="col-span-2 pt-1">
+                        <p className="text-slate-400 text-[10px] uppercase font-black tracking-wider mb-1">Reduction Amount</p>
+                        <div className="relative w-full">
+                          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-xs">₹</span>
+                          <input
+                            type="number"
+                            step="any"
+                            value={reduction || ''}
+                            onChange={(e) => handleReductionChange(c.id.toString(), e.target.value)}
+                            className="input-base pl-7 py-2"
+                            placeholder="0.00"
+                          />
+                        </div>
+                      </div>
+                      <div className="col-span-2 pt-1 border-t border-slate-50 flex justify-between items-center">
+                        <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Remaining Balance</span>
+                        <span className="font-bold text-orange-600 text-sm">₹{remainingBalance.toFixed(0)}</span>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </motion.div>
+        )}
+
+        {activeTab === 'types' && (
           <motion.div
             key="types"
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -10 }}
-            className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6"
+            className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 md:gap-6"
           >
             {feedTypes.map((type) => (
-              <div key={type.id} className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100 flex justify-between items-start">
+              <div key={type.id} className="bg-white p-4 md:p-6 rounded-xl md:rounded-2xl shadow-soft border border-slate-100 flex justify-between items-start">
                 <div>
-                  <div className="flex items-center gap-2 mb-2">
-                    <div className="w-8 h-8 bg-orange-100 text-orange-600 rounded-lg flex items-center justify-center">
-                      <Package size={18} />
+                  <div className="flex items-center gap-2 mb-1.5">
+                    <div className="w-7 h-7 md:w-8 md:h-8 bg-orange-100 text-orange-600 rounded-lg flex items-center justify-center">
+                      <Package size={14} className="md:hidden" />
+                      <Package size={16} className="hidden md:block" />
                     </div>
-                    <h4 className="font-bold text-slate-800 text-lg">{type.name}</h4>
+                    <h4 className="font-bold text-slate-800 text-sm md:text-lg">{type.name}</h4>
                   </div>
-                  <p className="text-slate-500 text-sm">Sale Rate: <span className="text-emerald-600 font-bold">₹{type.rate} / Unit</span></p>
+                  <p className="text-slate-500 text-xs md:text-sm">Rate: <span className="text-emerald-600 font-bold">₹{type.rate} / Unit</span></p>
                 </div>
-                <div className="flex gap-2">
+                <div className="flex gap-1 md:gap-2">
                   <button
                     onClick={() => {
                       setEditingType(type);
                       setTypeFormData({ name: type.name, rate: type.rate.toString() });
                       setIsTypeModalOpen(true);
                     }}
-                    className="p-2 text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg transition-all"
+                    className="p-2 text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg transition-all touch-btn"
                   >
-                    <Edit2 size={18} />
+                    <Edit2 size={15} />
                   </button>
                   <button
                     onClick={() => handleDeleteType(type.id)}
-                    className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all"
+                    className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all touch-btn"
                   >
-                    <Trash2 size={18} />
+                    <Trash2 size={15} />
                   </button>
                 </div>
               </div>
             ))}
+            {feedTypes.length === 0 && (
+              <div className="col-span-full bg-white rounded-2xl border border-slate-100 p-8 text-center">
+                <div className="w-12 h-12 rounded-xl bg-orange-50 flex items-center justify-center text-orange-200 mx-auto mb-3">
+                  <Package size={24} />
+                </div>
+                <p className="text-sm font-bold text-slate-400">No Feed Types</p>
+                <p className="text-xs text-slate-300 mt-1">Tap "Add Feed Type" to get started.</p>
+              </div>
+            )}
           </motion.div>
         )}
       </AnimatePresence>
 
       {/* Feed Type Modal */}
-      {isTypeModalOpen && (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md overflow-hidden">
-            <div className="p-6 border-b border-slate-100 flex justify-between items-center">
-              <h3 className="text-xl font-bold text-slate-800">{editingType ? 'Edit Feed Type' : 'Add Feed Type'}</h3>
-              <button 
-                onClick={() => { setIsTypeModalOpen(false); setEditingType(null); }} 
-                className="text-slate-400 hover:text-slate-600"
-              >
-                <X size={24} />
-              </button>
-            </div>
-            <form onSubmit={handleTypeSubmit} className="p-6 space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">Feed Name</label>
-                <input
-                  required
-                  type="text"
-                  placeholder="e.g. Godrej Super Feed"
-                  value={typeFormData.name}
-                  onChange={(e) => setTypeFormData({ ...typeFormData, name: e.target.value })}
-                  className="w-full p-2 rounded-lg border border-slate-200 focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 outline-none"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">Rate per Unit (₹)</label>
-                <input
-                  required
-                  type="number"
-                  step="0.01"
-                  placeholder="0.00"
-                  value={typeFormData.rate}
-                  onChange={(e) => setTypeFormData({ ...typeFormData, rate: e.target.value })}
-                  className="w-full p-2 rounded-lg border border-slate-200 focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 outline-none"
-                />
-              </div>
-              <div className="pt-4">
-                <button
-                  type="submit"
-                  className="w-full bg-emerald-600 text-white py-3 rounded-xl font-bold hover:bg-emerald-700 transition-colors shadow-md"
+      <AnimatePresence>
+        {isTypeModalOpen && (
+          <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-end sm:items-center justify-center p-0 sm:p-4">
+            <motion.div
+              initial={{ opacity: 0, y: 40 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 40 }}
+              className="bg-white rounded-t-3xl sm:rounded-2xl shadow-xl w-full sm:max-w-md overflow-hidden"
+            >
+              <div className="w-10 h-1 bg-slate-200 rounded-full mx-auto mt-3 mb-1 sm:hidden" />
+              <div className="p-5 border-b border-slate-100 flex justify-between items-center">
+                <h3 className="text-lg font-bold text-slate-800">{editingType ? 'Edit Feed Type' : 'Add Feed Type'}</h3>
+                <button 
+                  onClick={() => { setIsTypeModalOpen(false); setEditingType(null); }} 
+                  className="p-1.5 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg touch-btn"
                 >
-                  {editingType ? 'Update Feed' : 'Save Feed'}
+                  <X size={20} />
                 </button>
               </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* Record Purchase Modal */}
-      {isPurchaseModalOpen && (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md overflow-hidden">
-            <div className="p-6 border-b border-slate-100 flex justify-between items-center">
-              <h3 className="text-xl font-bold text-slate-800">Record Feed Purchase</h3>
-              <button 
-                onClick={() => setIsPurchaseModalOpen(false)} 
-                className="text-slate-400 hover:text-slate-600"
-              >
-                <X size={24} />
-              </button>
-            </div>
-            <form onSubmit={handlePurchaseSubmit} className="p-6 space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1 flex items-center gap-2">
-                  <User size={16} /> Customer
-                </label>
-                <select
-                  required
-                  value={purchaseFormData.customer_id}
-                  onChange={(e) => setPurchaseFormData({ ...purchaseFormData, customer_id: e.target.value })}
-                  className="w-full p-2 rounded-lg border border-slate-200 focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 outline-none"
-                >
-                  <option value="">Select Customer</option>
-                  {customers.map(c => (
-                    <option key={c.id} value={c.id}>{c.name}</option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1 flex items-center gap-2">
-                  <Package size={16} /> Feed Type
-                </label>
-                <select
-                  required
-                  value={purchaseFormData.feed_type_id}
-                  onChange={(e) => setPurchaseFormData({ ...purchaseFormData, feed_type_id: e.target.value })}
-                  className="w-full p-2 rounded-lg border border-slate-200 focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 outline-none"
-                >
-                  <option value="">Select Feed</option>
-                  {feedTypes.map(t => (
-                    <option key={t.id} value={t.id}>{t.name} (₹{t.rate})</option>
-                  ))}
-                </select>
-              </div>
-              <div className="grid grid-cols-2 gap-4">
+              <form onSubmit={handleTypeSubmit} className="p-5 space-y-3.5">
                 <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1 flex items-center gap-2">
-                    <Calendar size={16} /> Date
-                  </label>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1.5">Feed Name</label>
                   <input
                     required
-                    type="date"
-                    value={purchaseFormData.date}
-                    onChange={(e) => setPurchaseFormData({ ...purchaseFormData, date: e.target.value })}
-                    className="w-full p-2 rounded-lg border border-slate-200 focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 outline-none"
+                    type="text"
+                    placeholder="e.g. Godrej Super Feed"
+                    value={typeFormData.name}
+                    onChange={(e) => setTypeFormData({ ...typeFormData, name: e.target.value })}
+                    className="input-base"
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1 flex items-center gap-2">
-                    <ShoppingCart size={16} /> Quantity
-                  </label>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1.5">Rate per Unit (₹)</label>
                   <input
                     required
                     type="number"
                     step="0.01"
-                    placeholder="Qty"
-                    value={purchaseFormData.quantity}
-                    onChange={(e) => setPurchaseFormData({ ...purchaseFormData, quantity: e.target.value })}
-                    className="w-full p-2 rounded-lg border border-slate-200 focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 outline-none"
+                    placeholder="0.00"
+                    value={typeFormData.rate}
+                    onChange={(e) => setTypeFormData({ ...typeFormData, rate: e.target.value })}
+                    className="input-base"
                   />
                 </div>
-              </div>
-              
-              {purchaseFormData.feed_type_id && purchaseFormData.quantity && (
-                <div className="bg-orange-50 p-4 rounded-xl border border-orange-100 flex justify-between items-center">
-                  <span className="text-orange-700 font-medium">Total Cost:</span>
-                  <span className="text-xl font-bold text-orange-900 font-mono">
-                    ₹{(parseFloat(purchaseFormData.quantity) * (feedTypes.find(t => t.id.toString() === purchaseFormData.feed_type_id)?.rate || 0)).toFixed(2)}
-                  </span>
+                <div className="pt-2">
+                  <button
+                    type="submit"
+                    className="w-full bg-emerald-600 text-white py-3.5 rounded-xl font-bold hover:bg-emerald-700 transition-colors shadow-md text-sm touch-btn"
+                  >
+                    {editingType ? 'Update Feed' : 'Save Feed'}
+                  </button>
                 </div>
-              )}
+              </form>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
 
-              <div className="pt-4">
-                <button
-                  type="submit"
-                  className="w-full bg-emerald-600 text-white py-3 rounded-xl font-bold hover:bg-emerald-700 transition-colors shadow-md"
+      {/* Record Purchase Modal */}
+      <AnimatePresence>
+        {isPurchaseModalOpen && (
+          <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-end sm:items-center justify-center p-0 sm:p-4">
+            <motion.div
+              initial={{ opacity: 0, y: 40 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 40 }}
+              className="bg-white rounded-t-3xl sm:rounded-2xl shadow-xl w-full sm:max-w-md overflow-hidden"
+            >
+              <div className="w-10 h-1 bg-slate-200 rounded-full mx-auto mt-3 mb-1 sm:hidden" />
+              <div className="p-5 border-b border-slate-100 flex justify-between items-center">
+                <h3 className="text-lg font-bold text-slate-800">Record Feed Purchase</h3>
+                <button 
+                  onClick={() => setIsPurchaseModalOpen(false)} 
+                  className="p-1.5 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg touch-btn"
                 >
-                  Record Purchase
+                  <X size={20} />
                 </button>
               </div>
-            </form>
+              <form onSubmit={handlePurchaseSubmit} className="p-5 space-y-3.5 modal-scroll">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1.5 flex items-center gap-1.5">
+                    <User size={13} /> Customer
+                  </label>
+                  <select
+                    required
+                    value={purchaseFormData.customer_id}
+                    onChange={(e) => setPurchaseFormData({ ...purchaseFormData, customer_id: e.target.value })}
+                    className="input-base appearance-none"
+                  >
+                    <option value="">Select Customer</option>
+                    {customers.map(c => (
+                      <option key={c.id} value={c.id}>{c.name}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1.5 flex items-center gap-1.5">
+                    <Package size={13} /> Feed Type
+                  </label>
+                  <select
+                    required
+                    value={purchaseFormData.feed_type_id}
+                    onChange={(e) => setPurchaseFormData({ ...purchaseFormData, feed_type_id: e.target.value })}
+                    className="input-base appearance-none"
+                  >
+                    <option value="">Select Feed</option>
+                    {feedTypes.map(t => (
+                      <option key={t.id} value={t.id}>{t.name} (₹{t.rate})</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 mb-1.5 flex items-center gap-1.5">
+                      <Calendar size={13} /> Date
+                    </label>
+                    <input
+                      required
+                      type="date"
+                      value={purchaseFormData.date}
+                      onChange={(e) => setPurchaseFormData({ ...purchaseFormData, date: e.target.value })}
+                      className="input-base"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 mb-1.5 flex items-center gap-1.5">
+                      <ShoppingCart size={13} /> Quantity
+                    </label>
+                    <input
+                      required
+                      type="number"
+                      step="0.01"
+                      placeholder="Qty"
+                      value={purchaseFormData.quantity}
+                      onChange={(e) => setPurchaseFormData({ ...purchaseFormData, quantity: e.target.value })}
+                      className="input-base"
+                    />
+                  </div>
+                </div>
+                
+                {purchaseFormData.feed_type_id && purchaseFormData.quantity && (
+                  <div className="bg-orange-50 p-3.5 rounded-xl border border-orange-100 flex justify-between items-center">
+                    <span className="text-orange-700 font-medium text-sm">Total Cost:</span>
+                    <span className="text-lg font-bold text-orange-900 font-mono">
+                      ₹{(parseFloat(purchaseFormData.quantity) * (feedTypes.find(t => t.id.toString() === purchaseFormData.feed_type_id)?.rate || 0)).toFixed(2)}
+                    </span>
+                  </div>
+                )}
+
+                <div className="pt-2">
+                  <button
+                    type="submit"
+                    className="w-full bg-emerald-600 text-white py-3.5 rounded-xl font-bold hover:bg-emerald-700 transition-colors shadow-md text-sm touch-btn"
+                  >
+                    Record Purchase
+                  </button>
+                </div>
+              </form>
+            </motion.div>
           </div>
-        </div>
-      )}
+        )}
+      </AnimatePresence>
     </div>
   );
 }

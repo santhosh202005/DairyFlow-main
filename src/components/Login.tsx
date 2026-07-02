@@ -1,12 +1,14 @@
 import React, { useState } from 'react';
 import { Lock, User, LogIn, AlertCircle, Phone, Smartphone, ArrowRight, KeyRound } from 'lucide-react';
 import { motion } from 'motion/react';
+import { useTranslation } from '../i18n';
 
 interface LoginProps {
-  onLogin: (token: string, role: string, customerId?: string, customerName?: string, defaultRate?: number, customerPhone?: string, customerAddress?: string) => void;
+  onLogin: (token: string, role: string, customerId?: string, customerName?: string, defaultRate?: number, customerPhone?: string, customerAddress?: string, customerGender?: 'male' | 'female') => void;
 }
 
 export default function Login({ onLogin }: LoginProps) {
+  const { t } = useTranslation();
   const [loginType, setLoginType] = useState<'customer' | 'admin'>('customer');
   const [isForgotPassword, setIsForgotPassword] = useState(false);
   
@@ -53,7 +55,7 @@ export default function Login({ onLogin }: LoginProps) {
       const data = await response.json();
 
       if (response.ok && data.success) {
-        onLogin(data.token, data.role, data.customerId, data.customerName, data.defaultRate, data.customerPhone, data.customerAddress);
+        onLogin(data.token, data.role, data.customerId, data.customerName, data.defaultRate, data.customerPhone, data.customerAddress, data.customerGender);
       } else {
         let msg = data.message || 'Invalid credentials. Please try again.';
         if (loginType === 'admin' && username.toLowerCase() === 'admin') {
@@ -137,13 +139,13 @@ export default function Login({ onLogin }: LoginProps) {
         animate={{ opacity: 1, y: 0 }}
         className="w-full max-w-md bg-white rounded-3xl shadow-xl border border-slate-100 overflow-hidden"
       >
-        <div className="p-8 bg-emerald-600 text-white text-center">
+          <div className="p-8 bg-emerald-600 text-white text-center">
           <div className="w-20 h-20 bg-white rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-lg overflow-hidden border-2 border-emerald-500/20">
             <img src="/logo.jpg" alt="DairyFlow Logo" className="w-full h-full object-cover" />
           </div>
-          <h2 className="text-2xl font-bold">DairyFlow Portal</h2>
+          <h2 className="text-2xl font-bold">{t('portalTitle')}</h2>
           <p className="text-emerald-100 text-sm mt-1">
-            {isForgotPassword ? 'Reset Password' : 'Sign in to your account'}
+            {isForgotPassword ? t('resetPassword') : t('signInToYourAccount')}
           </p>
         </div>
 
@@ -153,13 +155,13 @@ export default function Login({ onLogin }: LoginProps) {
               onClick={() => { setLoginType('customer'); setUsername(''); setPassword(''); setError(''); setMessage(''); }}
               className={`flex-1 py-4 text-sm font-medium transition-colors ${loginType === 'customer' ? 'text-emerald-600 border-b-2 border-emerald-600 bg-emerald-50/50' : 'text-slate-500 hover:text-slate-700 hover:bg-slate-50'}`}
             >
-              Customer Login
+              {t('customerLogin')}
             </button>
             <button
               onClick={() => { setLoginType('admin'); setUsername(''); setPassword(''); setError(''); setMessage(''); }}
               className={`flex-1 py-4 text-sm font-medium transition-colors ${loginType === 'admin' ? 'text-emerald-600 border-b-2 border-emerald-600 bg-emerald-50/50' : 'text-slate-500 hover:text-slate-700 hover:bg-slate-50'}`}
             >
-              Admin Login
+              {t('adminLogin')}
             </button>
           </div>
         )}
@@ -189,16 +191,16 @@ export default function Login({ onLogin }: LoginProps) {
 
           {isForgotPassword ? (
             <div className="space-y-6">
-              <h3 className="text-lg font-bold text-slate-800 flex items-center gap-2">
-                <KeyRound size={20} className="text-emerald-600" />
-                Forgot Password
-              </h3>
+                      <h3 className="text-lg font-bold text-slate-800 flex items-center gap-2">
+                        <KeyRound size={20} className="text-emerald-600" />
+                        {t('forgotPassword')}
+                      </h3>
 
               {!isOtpSent ? (
                 <form onSubmit={handleRequestOtp} className="space-y-6">
                   <div>
-                    <label className="block text-sm font-medium text-slate-700 mb-1 flex items-center gap-2">
-                      <Phone size={16} /> Phone Number
+                      <label className="block text-sm font-medium text-slate-700 mb-1 flex items-center gap-2">
+                      <Phone size={16} /> {t('username')}
                     </label>
                     <input
                       required
@@ -210,26 +212,26 @@ export default function Login({ onLogin }: LoginProps) {
                     />
                   </div>
                   
-                  <button
-                    type="submit"
-                    disabled={isLoading || !phone}
-                    className="w-full bg-emerald-600 text-white py-4 rounded-xl font-bold hover:bg-emerald-700 transition-all shadow-lg shadow-emerald-600/20 flex items-center justify-center gap-2 disabled:opacity-70"
-                  >
-                    {isLoading ? (
-                      <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                    ) : (
-                      <>
-                        Get OTP
-                        <ArrowRight size={20} />
-                      </>
-                    )}
-                  </button>
+                      <button
+                        type="submit"
+                        disabled={isLoading || !phone}
+                        className="w-full bg-emerald-600 text-white py-4 rounded-xl font-bold hover:bg-emerald-700 transition-all shadow-lg shadow-emerald-600/20 flex items-center justify-center gap-2 disabled:opacity-70"
+                      >
+                        {isLoading ? (
+                          <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                        ) : (
+                          <>
+                            {t('getOtp')}
+                            <ArrowRight size={20} />
+                          </>
+                        )}
+                      </button>
                 </form>
               ) : (
                 <form onSubmit={handleResetPassword} className="space-y-6">
                   <div>
                     <label className="block text-sm font-medium text-slate-700 mb-1 flex items-center gap-2">
-                      <Lock size={16} /> Enter OTP
+                      <Lock size={16} /> {t('resetPassword')}
                     </label>
                     <input
                       required
@@ -264,9 +266,9 @@ export default function Login({ onLogin }: LoginProps) {
                     {isLoading ? (
                       <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
                     ) : (
-                      <>
+                        <>
                         <KeyRound size={20} />
-                        Reset Password
+                        {t('resetPassword')}
                       </>
                     )}
                   </button>
@@ -278,7 +280,7 @@ export default function Login({ onLogin }: LoginProps) {
                   onClick={() => { setIsForgotPassword(false); setIsOtpSent(false); setPhone(''); setOtp(''); setNewPassword(''); setError(''); setMessage(''); }}
                   className="text-sm text-slate-500 hover:text-emerald-600 font-medium transition-colors"
                 >
-                  Back to Login
+                  {t('backToLogin')}
                 </button>
               </div>
             </div>
@@ -287,30 +289,30 @@ export default function Login({ onLogin }: LoginProps) {
               <div className="space-y-4">
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-1 flex items-center gap-2">
-                    <User size={16} /> Username
+                    <User size={16} /> {t('username')}
                   </label>
                   <input
                     required
                     type="text"
                     value={username}
                     onChange={(e) => setUsername(e.target.value)}
-                    placeholder={loginType === 'admin' ? "Enter admin username" : "Enter customer username"}
+                    placeholder={loginType === 'admin' ? t('enterAdminUsername') : t('enterCustomerUsername')}
                     className="w-full p-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 outline-none transition-all"
                   />
                 </div>
 
                 <div>
                   <div className="flex justify-between items-center mb-1">
-                    <label className="block text-sm font-medium text-slate-700 flex items-center gap-2">
-                      <Lock size={16} /> Password
+                      <label className="block text-sm font-medium text-slate-700 flex items-center gap-2">
+                      <Lock size={16} /> {t('password')}
                     </label>
-                    {loginType === 'customer' && (
+                      {loginType === 'customer' && (
                       <button
                         type="button"
                         onClick={() => { setIsForgotPassword(true); setError(''); setMessage(''); }}
                         className="text-xs text-emerald-600 hover:text-emerald-700 font-medium"
                       >
-                        Forgot Password?
+                        {t('forgotPassword')}
                       </button>
                     )}
                   </div>
@@ -330,12 +332,12 @@ export default function Login({ onLogin }: LoginProps) {
                 disabled={isLoading}
                 className="w-full bg-emerald-600 text-white py-4 rounded-xl font-bold hover:bg-emerald-700 transition-all shadow-lg shadow-emerald-600/20 flex items-center justify-center gap-2 disabled:opacity-70"
               >
-                {isLoading ? (
+                    {isLoading ? (
                   <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
                 ) : (
                   <>
-                    <LogIn size={20} />
-                    Sign In as {loginType === 'admin' ? 'Admin' : 'Customer'}
+                        <LogIn size={20} />
+                        {loginType === 'admin' ? t('signInAsAdmin') : t('signInAsCustomer')}
                   </>
                 )}
               </button>
