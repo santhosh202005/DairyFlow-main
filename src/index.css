@@ -94,9 +94,15 @@
 
 /* ── Modal: always fits on small screens ─────────────────────── */
 .modal-scroll {
-  max-height: calc(100dvh - 2rem);
+  max-height: calc(100vh - 10rem);
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
+}
+
+@media (max-width: 640px) {
+  .modal-scroll {
+    max-height: calc(100vh - 7rem);
+  }
 }
 
 /* ── Page title sizes ────────────────────────────────────────── */
@@ -138,7 +144,41 @@
   @apply w-full px-3 py-3 rounded-xl border border-slate-200 text-sm font-medium text-slate-700 bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all;
   font-size: 14px; /* prevents zoom on iOS */
 }
+.search-bar {
+  @apply w-full flex items-center gap-3 px-4 py-2 rounded-[20px] border border-slate-200 bg-white shadow-soft transition-all;
+  min-height: 48px;
+  max-width: 100%;
+}
 
+.search-bar:focus-within {
+  @apply border-emerald-500 ring-1 ring-emerald-500/20;
+}
+
+.search-icon {
+  @apply w-5 h-5;
+}
+
+.search-input {
+  @apply flex-1 min-w-0 border-0 bg-transparent text-slate-700 placeholder:text-slate-400 outline-none transition-all;
+  font-size: 16px;
+}
+
+.search-clear-button {
+  @apply flex items-center justify-center p-2 rounded-full text-slate-400 hover:bg-slate-100 hover:text-slate-600 transition-colors;
+}
+
+@media (max-width: 768px) {
+  .search-bar {
+    @apply px-3 py-2;
+    min-height: 48px;
+  }
+  .search-input {
+    font-size: 14px;
+  }
+  .search-icon {
+    @apply w-[18px] h-[18px];
+  }
+}
 /* ── Touch-friendly button heights ──────────────────────────── */
 .touch-btn {
   min-height: 44px;

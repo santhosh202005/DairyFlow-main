@@ -2,6 +2,8 @@ import { useState, useEffect } from 'react';
 import { FileText, Download, Printer, Search, ArrowLeft, Calendar, Droplets, Wallet, Package, ChevronRight } from 'lucide-react';
 import { BillingRecord } from '../types';
 import { motion } from 'motion/react';
+import SearchBar from './SearchBar';
+import { useDebouncedValue } from '../hooks/useDebouncedValue';
 
 interface BillingProps {
   customerId?: string;
@@ -15,15 +17,25 @@ export default function Billing({ customerId }: BillingProps) {
     advances: any[];
     feedPurchases: any[];
   } | null>(null);
+  const [detailError, setDetailError] = useState<string | null>(null);
   
   const [selectedMonth, setSelectedMonth] = useState(new Date().toISOString().split('T')[0].substring(0, 7));
   const [search, setSearch] = useState('');
+  const debouncedSearch = useDebouncedValue(search, 400);
   const [viewingDetails, setViewingDetails] = useState<string | null>(customerId || null);
+
+  useEffect(() => {
+    if (customerId) {
+      setViewingDetails(customerId);
+    }
+  }, [customerId]);
 
   useEffect(() => {
     if (viewingDetails) {
       fetchDetailedBilling(viewingDetails);
     } else {
+      setDetailError(null);
+      setDetailedData(null);
       fetchBilling();
     }
   }, [selectedMonth, viewingDetails]);
@@ -31,20 +43,66 @@ export default function Billing({ customerId }: BillingProps) {
   const fetchBilling = () => {
     fetch(`/api/billing/${selectedMonth}`)
       .then(res => res.json())
-      .then(data => setBillingData(data));
+      .then(data => setBillingData(data))
+      .catch(() => setBillingData([]));
   };
 
   const fetchDetailedBilling = (id: string) => {
+    setDetailError(null);
     fetch(`/api/billing/${selectedMonth}/${id}`)
-      .then(res => res.json())
-      .then(data => setDetailedData(data));
+      .then(async (res) => {
+        if (!res.ok) {
+          const payload = await res.json().catch(() => ({}));
+          throw new Error(payload?.message || 'Unable to fetch report');
+        }
+        return res.json();
+      })
+      .then((data) => {
+        setDetailedData(data);
+      })
+      .catch((error) => {
+        console.error('Billing detail load failed:', error);
+        setDetailError(String(error.message || error));
+        setDetailedData(null);
+      });
   };
 
   const filteredBilling = billingData.filter(b => 
-    b.name.toLowerCase().includes(search.toLowerCase())
+    b.name.toLowerCase().includes(debouncedSearch.toLowerCase()) ||
+    b.customer_id.toLowerCase().includes(debouncedSearch.toLowerCase())
   );
 
-  if (viewingDetails && detailedData) {
+  if (viewingDetails) {
+    if (detailError) {
+      return (
+        <div className="space-y-4 md:space-y-10 pb-4 md:pb-20">
+          <div className="bg-white rounded-2xl border border-rose-100 p-8 text-center shadow-soft">
+            <p className="text-xl font-display font-bold text-rose-600">Unable to load report</p>
+            <p className="text-sm text-slate-500 mt-2">{detailError}</p>
+            <button
+              onClick={() => {
+                setDetailError(null);
+                fetchDetailedBilling(viewingDetails);
+              }}
+              className="mt-6 inline-flex items-center justify-center px-5 py-3 rounded-xl bg-emerald-600 text-white font-bold text-sm hover:bg-emerald-700 transition-colors touch-btn"
+            >
+              Retry
+            </button>
+          </div>
+        </div>
+      );
+    }
+
+    if (!detailedData) {
+      return (
+        <div className="space-y-4 md:space-y-10 pb-4 md:pb-20">
+          <div className="bg-white rounded-2xl border border-slate-100 p-8 text-center shadow-soft">
+            <p className="text-lg font-display font-bold text-slate-900">Loading customer report…</p>
+          </div>
+        </div>
+      );
+    }
+
     const totalMilkAmount = detailedData.milkEntries.reduce((acc, curr) => acc + curr.amount, 0);
     const totalCashAdvances = (detailedData.advances || [])
       .filter((a: any) => a.type !== 'deduction')
@@ -464,14 +522,12 @@ export default function Billing({ customerId }: BillingProps) {
         </div>
 
         <div className="flex items-center gap-2 w-full md:w-auto">
-          <div className="relative flex-1 md:w-72 group">
-            <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-300 group-focus-within:text-emerald-500 transition-colors" size={16} />
-            <input
-              type="text"
-              placeholder="Search farmers..."
+          <div className="flex-1 md:w-72">
+            <SearchBar
               value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              className="input-base pl-10 rounded-2xl"
+              onChange={setSearch}
+              placeholder="Search farmers by name or ID..."
+              className="w-full"
             />
           </div>
           <button className="w-10 h-10 md:w-14 md:h-14 flex items-center justify-center bg-white border border-slate-100 rounded-xl md:rounded-[1.5rem] text-slate-400 hover:text-slate-900 hover:border-slate-300 shadow-soft active:scale-95 transition-all touch-btn flex-shrink-0">

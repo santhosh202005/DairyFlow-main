@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { Plus, Trash2, Calendar, User, Droplets, ChevronDown } from 'lucide-react';
+import React, { useEffect, useMemo, useState } from 'react';
+import { Plus, Trash2, Calendar, User, Droplets, Search, Filter, ArrowUpDown } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { MilkEntry, Customer } from '../types';
 import { useTranslation } from '../i18n';
@@ -10,14 +10,40 @@ interface MilkEntriesProps {
   defaultRate?: number;
 }
 
-const getCurrentMonth = () => new Date().toISOString().substring(0, 7);
+const getCurrentMonthKey = () => new Date().toISOString().substring(0, 7);
+
+const monthNames = ['January','February','March','April','May','June','July','August','September','October','November','December'] as const;
+
+type SortBy = 'date' | 'customer';
+type SortDir = 'asc' | 'desc';
 
 export default function MilkEntries({ customerId, isAdmin = true, defaultRate }: MilkEntriesProps) {
   const { t } = useTranslation();
+
   const [entries, setEntries] = useState<MilkEntry[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
+
+  const [isLoadingEntries, setIsLoadingEntries] = useState(false);
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [selectedMonth, setSelectedMonth] = useState<string>(getCurrentMonth());
+
+  const current = useMemo(() => new Date(), []);
+  const [selectedMonthIndex, setSelectedMonthIndex] = useState(() => current.getMonth());
+  const [selectedYear, setSelectedYear] = useState(() => current.getFullYear());
+
+  const selectedMonthKey = useMemo(() => {
+    const mm = String(selectedMonthIndex + 1).padStart(2, '0');
+    return `${selectedYear}-${mm}`;
+  }, [selectedMonthIndex, selectedYear]);
+
+  const [query, setQuery] = useState('');
+  const [dateInMonth, setDateInMonth] = useState<string>('');
+  const [paymentStatusFilter, setPaymentStatusFilter] = useState<'all'>('all');
+
+  const [sortBy, setSortBy] = useState<SortBy>('date');
+  const [sortDir, setSortDir] = useState<SortDir>('desc');
+
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(20);
 
   const [formData, setFormData] = useState({
     customer_id: customerId ? customerId.toString() : '',
@@ -26,6 +52,16 @@ export default function MilkEntries({ customerId, isAdmin = true, defaultRate }:
     liters: '',
     rate: defaultRate?.toString() || ''
   });
+
+  useEffect(() => {
+    if (customerId) {
+      setFormData((prev) => ({
+        ...prev,
+        customer_id: customerId.toString(),
+        rate: prev.rate || defaultRate?.toString() || '30',
+      }));
+    }
+  }, [customerId, defaultRate]);
 
   useEffect(() => {
     if (formData.customer_id && isAdmin) {
@@ -37,18 +73,83 @@ export default function MilkEntries({ customerId, isAdmin = true, defaultRate }:
   }, [formData.customer_id, customers, isAdmin]);
 
   useEffect(() => {
-    fetchEntries();
-    if (isAdmin) fetchCustomers();
-  }, [customerId, isAdmin]);
+    setPage(1);
+  }, [selectedMonthKey, query, sortBy, sortDir, dateInMonth, paymentStatusFilter, pageSize, customerId]);
 
   const fetchEntries = () => {
+    setIsLoadingEntries(true);
     const url = customerId ? `/api/entries?customerId=${customerId}` : '/api/entries';
     fetch(url)
       .then(res => res.json())
-      .then(data => setEntries(data));
+      .then(data => setEntries(data))
+      .catch(() => {
+        // keep empty state
+      })
+      .finally(() => setIsLoadingEntries(false));
   };
 
-  const filteredEntries = entries.filter((entry) => entry.date.startsWith(selectedMonth));
+  useEffect(() => {
+    fetchEntries();
+    if (isAdmin) fetchCustomers();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [customerId, isAdmin]);
+
+  const filteredEntries = useMemo(() => {
+    const q = query.trim().toLowerCase();
+
+    let res = entries.filter((entry) => entry.date.startsWith(selectedMonthKey));
+
+    if (dateInMonth) {
+      res = res.filter((e) => e.date === dateInMonth);
+    }
+
+    if (q) {
+      res = res.filter((e) => {
+        const dateStr = new Date(e.date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }).toLowerCase();
+        return (
+          e.customer_name?.toLowerCase().includes(q) ||
+          e.customer_id?.toLowerCase().includes(q) ||
+          String(e.rate).includes(q) ||
+          dateStr.includes(q)
+        );
+      });
+    }
+
+    if (paymentStatusFilter !== 'all') {
+      // backend currently does not return payment status in MilkEntry type
+      // leaving filter placeholder to keep UI consistent
+    }
+
+    res = res.slice();
+    res.sort((a, b) => {
+      let va: number | string = '';
+      let vb: number | string = '';
+
+      if (sortBy === 'date') {
+        va = a.date;
+        vb = b.date;
+      } else {
+        va = a.customer_name || '';
+        vb = b.customer_name || '';
+      }
+
+      if (typeof va === 'string' && typeof vb === 'string') {
+        const cmp = va.localeCompare(vb, undefined, { numeric: true, sensitivity: 'base' });
+        return sortDir === 'asc' ? cmp : -cmp;
+      }
+
+      const cmp = Number(va) - Number(vb);
+      return sortDir === 'asc' ? cmp : -cmp;
+    });
+
+    return res;
+  }, [entries, selectedMonthKey, query, dateInMonth, paymentStatusFilter, sortBy, sortDir]);
+
+  const pagedEntries = useMemo(() => {
+    const start = (page - 1) * pageSize;
+    return filteredEntries.slice(start, start + pageSize);
+  }, [filteredEntries, page, pageSize]);
+
 
   const fetchCustomers = () => {
     fetch('/api/customers')
@@ -128,9 +229,253 @@ export default function MilkEntries({ customerId, isAdmin = true, defaultRate }:
 
   const currentRate = formData.rate ? parseFloat(formData.rate) : (isAdmin ? 30 : (defaultRate || 30));
 
+  const monthEntriesGrouped = useMemo(() => {
+    // Group by date + customer so we can show Morning/Evening in a single row
+    type Row = {
+      id: string;
+      date: string;
+      customer_id: string;
+      customer_name: string;
+      morningLiters: number;
+      eveningLiters: number;
+      rate: number;
+      totalLiters: number;
+      totalAmount: number;
+    };
+
+    const map = new Map<string, Row>();
+
+    for (const e of filteredEntries) {
+      const key = `${e.date}__${e.customer_id}`;
+      const rate = e.rate ?? currentRate;
+
+      const row = map.get(key) || {
+        id: key,
+        date: e.date,
+        customer_id: e.customer_id,
+        customer_name: e.customer_name || '',
+        morningLiters: 0,
+        eveningLiters: 0,
+        rate,
+        totalLiters: 0,
+        totalAmount: 0,
+      };
+
+      if (e.shift === 'AM') row.morningLiters += e.liters;
+      else row.eveningLiters += e.liters;
+
+      row.rate = row.rate || rate;
+      row.totalLiters = row.morningLiters + row.eveningLiters;
+      row.totalAmount = row.totalLiters * row.rate;
+
+      map.set(key, row);
+    }
+
+
+    const rows = Array.from(map.values());
+
+    // Apply sort again at row level
+    rows.sort((a, b) => {
+      if (sortBy === 'date') {
+        const cmp = a.date.localeCompare(b.date);
+        return sortDir === 'asc' ? cmp : -cmp;
+      }
+      const cmp = (a.customer_name || '').localeCompare(b.customer_name || '', undefined, { numeric: true, sensitivity: 'base' });
+      return sortDir === 'asc' ? cmp : -cmp;
+    });
+
+
+    return rows;
+  }, [filteredEntries, currentRate, sortBy, sortDir]);
+
+  const pagedRows = useMemo(() => {
+    const start = (page - 1) * pageSize;
+    return monthEntriesGrouped.slice(start, start + pageSize);
+  }, [monthEntriesGrouped, page, pageSize]);
+
+  const monthlyTotals = useMemo(() => {
+    const totals = {
+      morning: 0,
+      evening: 0,
+      total: 0,
+      amount: 0,
+    };
+
+    for (const r of monthEntriesGrouped) {
+      totals.morning += r.morningLiters;
+      totals.evening += r.eveningLiters;
+      totals.total += r.totalLiters;
+      totals.amount += r.totalAmount;
+    }
+
+    return totals;
+  }, [monthEntriesGrouped]);
+
+  const isMobileTiny = typeof window !== 'undefined' ? window.innerWidth <= 540 : false;
+
+  const monthLabel = `${monthNames[selectedMonthIndex]} ${selectedYear}`;
+
   return (
     <div className="space-y-4 md:space-y-10 relative">
+
+      <div className="bg-white rounded-2xl md:rounded-[2.5rem] shadow-soft border border-slate-100 p-4 md:p-6 space-y-4">
+        {/* Top controls */}
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <h2 className="page-title">{t('supplyJournal')}</h2>
+              <p className="text-slate-500 text-sm">{isAdmin ? t('trackDailyCollections') : t('monitorContributions')}</p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2">
+            {/* Month + Year */}
+            <div className="flex items-center gap-2">
+              <div className="relative">
+                <select
+                  value={selectedMonthIndex}
+                  onChange={(e) => setSelectedMonthIndex(parseInt(e.target.value, 10))}
+                  className="input-base !pr-8 !py-2.5 bg-white"
+                  aria-label="Select month"
+                >
+                  {monthNames.map((m, i) => (
+                    <option key={m} value={i}>{m}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="relative">
+                <select
+                  value={selectedYear}
+                  onChange={(e) => setSelectedYear(parseInt(e.target.value, 10))}
+                  className="input-base !pr-8 !py-2.5 bg-white"
+                  aria-label="Select year"
+                >
+                  {Array.from({ length: 6 }).map((_, idx) => {
+                    const y = current.getFullYear() - idx;
+                    return <option key={y} value={y}>{y}</option>;
+                  })}
+                </select>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+          <div className="md:col-span-2">
+            <div className="search-bar w-full">
+              <Search className="search-icon text-slate-400" />
+              <input
+                className="search-input"
+                placeholder="Search by customer, date or rate..."
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+              />
+              {query && (
+                <button
+                  type="button"
+                  className="search-clear-button"
+                  onClick={() => setQuery('')}
+                  aria-label="Clear search"
+                >
+                  <span className="text-lg leading-none">×</span>
+                </button>
+              )}
+            </div>
+          </div>
+
+          <div className="flex gap-3">
+            <div className="flex-1">
+              <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1 px-1">Date</label>
+              <div className="relative group">
+                <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-300 group-focus-within:text-emerald-500 transition-colors" size={16} />
+                <input
+                  type="date"
+                  value={dateInMonth}
+                  onChange={(e) => setDateInMonth(e.target.value)}
+                  className="input-base pl-9 !py-3"
+                />
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => {
+                setSortBy('date');
+                setSortDir((d) => (sortBy === 'date' ? (d === 'asc' ? 'desc' : 'asc') : 'desc'));
+              }}
+              className="flex items-center gap-2 px-4 py-2 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 touch-btn font-bold text-sm text-slate-700"
+            >
+              <ArrowUpDown size={16} /> Date
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setSortBy('customer');
+                setSortDir((d) => (sortBy === 'customer' ? (d === 'asc' ? 'desc' : 'asc') : 'asc'));
+              }}
+              className="flex items-center gap-2 px-4 py-2 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 touch-btn font-bold text-sm text-slate-700"
+            >
+              <User size={16} /> Customer
+            </button>
+          </div>
+
+          <div className="text-sm font-bold text-slate-600">
+            Showing: <span className="text-emerald-700">{monthLabel}</span>
+          </div>
+        </div>
+      </div>
+
+      {/* Fixed Add Entry: desktop */}
+      {(
+        isAdmin || Boolean(customerId)
+      ) && (
+        <button
+          onClick={() => {
+            setFormData(prev => ({
+              ...prev,
+              customer_id: customerId ? customerId.toString() : prev.customer_id,
+              date: new Date().toISOString().split('T')[0],
+            }));
+            setIsModalOpen(true);
+          }}
+          className="hidden sm:flex fixed top-24 right-6 z-[60] items-center gap-2 bg-emerald-600 text-white px-4 py-3 rounded-2xl font-black shadow-lg shadow-emerald-100 hover:bg-emerald-700 transition-all active:scale-95 touch-btn"
+          aria-label="Add entry"
+        >
+          <Plus size={18} /> {t('newEntry')}
+        </button>
+      )}
+
+      {/* Sticky Add Entry: mobile */}
+      {(
+        isAdmin || Boolean(customerId)
+      ) && (
+        <div className="sm:hidden fixed bottom-0 right-0 z-[70] px-3 pb-4 pt-2 safe-area-inset-bottom">
+          <button
+            onClick={() => {
+              setFormData(prev => ({
+                ...prev,
+                customer_id: customerId ? customerId.toString() : prev.customer_id,
+                date: new Date().toISOString().split('T')[0],
+              }));
+              setIsModalOpen(true);
+            }}
+            className="w-auto bg-emerald-600 text-white px-4 py-3 rounded-2xl font-black shadow-lg shadow-emerald-100 hover:bg-emerald-700 transition-all active:scale-95 touch-btn"
+            aria-label="Add entry"
+          >
+            <span className="inline-flex items-center justify-center gap-2">
+              <Plus size={18} /> {t('newEntry')}
+            </span>
+          </button>
+        </div>
+      )}
+
+
       <AnimatePresence>
+
         {showConfirmModal !== null && (
           <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-md z-[100] flex items-center justify-center p-4">
             <motion.div 
@@ -163,93 +508,93 @@ export default function MilkEntries({ customerId, isAdmin = true, defaultRate }:
           </div>
         )}
       </AnimatePresence>
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="page-title">{t('supplyJournal')}</h2>
-          <p className="text-slate-500 text-sm">{isAdmin ? t('trackDailyCollections') : t('monitorContributions')}</p>
+      {/* Loading */}
+      {isLoadingEntries && (
+        <div className="bg-white rounded-2xl md:rounded-[2.5rem] shadow-soft border border-slate-100 p-8 text-center">
+          <div className="w-12 h-12 mx-auto rounded-2xl bg-emerald-50 border border-emerald-100 flex items-center justify-center text-emerald-600 animate-pulse">
+            <Droplets size={28} />
+          </div>
+          <p className="mt-3 text-sm font-bold text-slate-400">Loading entries...</p>
         </div>
-        <div>
-          <button
-            onClick={() => { setFormData(prev => ({ ...prev, customer_id: customerId ? customerId.toString() : '', date: new Date().toISOString().split('T')[0] })); setIsModalOpen(true); }}
-            className="flex items-center gap-2 bg-slate-900 text-white px-4 py-2 rounded-xl font-black"
-          >
-            <Plus size={16} /> {t('newEntry')}
-          </button>
-        </div>
-      </div>
+      )}
 
-      {/* Table — desktop & tablet (reintroduced) */}
+      {/* Table — desktop & tablet */}
       <div className="bg-white rounded-2xl md:rounded-[2.5rem] shadow-soft border border-slate-100 overflow-hidden hidden sm:block">
-        <div className="overflow-x-auto">
+        <div className="overflow-x-auto table-scroll-wrapper">
           <table className="w-full text-left border-collapse mobile-compact-table">
-            <thead>
-              <tr className="bg-slate-50/50 border-b border-slate-50">
-                <th className="px-4 md:px-10 py-3 md:py-6 font-black text-slate-300 text-[10px] md:text-[10px] uppercase tracking-[0.2em]">Date</th>
-                <th className="px-4 md:px-10 py-3 md:py-6 font-black text-slate-300 text-[10px] uppercase tracking-[0.2em]">Shift</th>
-                {isAdmin && <th className="px-4 md:px-10 py-3 md:py-6 font-black text-slate-300 text-[10px] uppercase tracking-[0.2em]">Farmer</th>}
-                <th className="px-4 md:px-10 py-3 md:py-6 font-black text-slate-300 text-[10px] uppercase tracking-[0.2em]">Volume</th>
-                <th className="px-4 md:px-10 py-3 md:py-6 font-black text-slate-300 text-[10px] uppercase tracking-[0.2em]">Amount</th>
-                {isAdmin && <th className="px-4 md:px-10 py-3 md:py-6 font-black text-slate-300 text-[10px] uppercase tracking-[0.2em] text-right">Del</th>}
+            <thead className="sticky top-0 z-10">
+              <tr className="bg-white/95 backdrop-blur border-b border-slate-100">
+                <th className="px-4 md:px-10 py-3 md:py-5 font-black text-slate-300 text-[10px] uppercase tracking-[0.2em]">Date</th>
+                <th className="px-4 md:px-10 py-3 md:py-5 font-black text-slate-300 text-[10px] uppercase tracking-[0.2em]">Customer Name</th>
+                <th className="px-4 md:px-10 py-3 md:py-5 font-black text-slate-300 text-[10px] uppercase tracking-[0.2em] text-right">Morning Milk (L)</th>
+                <th className="px-4 md:px-10 py-3 md:py-5 font-black text-slate-300 text-[10px] uppercase tracking-[0.2em] text-right">Evening Milk (L)</th>
+                <th className="px-4 md:px-10 py-3 md:py-5 font-black text-slate-300 text-[10px] uppercase tracking-[0.2em] text-right">Total Milk (L)</th>
+                <th className="px-4 md:px-10 py-3 md:py-5 font-black text-slate-300 text-[10px] uppercase tracking-[0.2em] text-right">Rate per Liter</th>
+                <th className="px-4 md:px-10 py-3 md:py-5 font-black text-slate-300 text-[10px] uppercase tracking-[0.2em] text-right">Total Amount</th>
+                <th className="px-4 md:px-10 py-3 md:py-5 font-black text-slate-300 text-[10px] uppercase tracking-[0.2em]">Payment Status</th>
+                {isAdmin && <th className="px-4 md:px-10 py-3 md:py-5 font-black text-slate-300 text-[10px] uppercase tracking-[0.2em] text-right">Action</th>}
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-50">
-              {filteredEntries.map((entry) => (
-                <tr key={entry.id} className="group hover:bg-emerald-50/20 transition-all">
+
+              {pagedRows.map((row: any) => (
+                <tr key={row.id} className="group hover:bg-emerald-50/20 transition-all">
                   <td className="px-4 md:px-10 py-3 md:py-6">
-                    <p className="text-xs md:text-sm font-bold text-slate-900">{new Date(entry.date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}</p>
-                    <p className="text-[9px] md:text-[10px] text-slate-400 font-black uppercase tracking-widest leading-none mt-0.5">{new Date(entry.date).getFullYear()}</p>
+                    <p className="text-xs md:text-sm font-bold text-slate-900">{new Date(row.date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}</p>
+                    <p className="text-[9px] md:text-[10px] text-slate-400 font-black uppercase tracking-widest leading-none mt-0.5">{new Date(row.date).getFullYear()}</p>
                   </td>
                   <td className="px-4 md:px-10 py-3 md:py-6">
-                    <span className={`px-2 py-0.5 md:px-2.5 md:py-1 rounded-md text-[9px] md:text-[10px] font-black uppercase tracking-widest ${
-                      entry.shift === 'AM' ? 'bg-amber-100 text-amber-700' : 'bg-indigo-100 text-indigo-700 shadow-sm'
-                    }`}>
-                      {entry.shift === 'AM' ? 'AM' : 'PM'}
+                    <p className="font-bold text-slate-700 text-xs md:text-sm tracking-tight truncate max-w-[120px] md:max-w-none">{row.customer_name}</p>
+                  </td>
+                  <td className="px-4 md:px-10 py-3 md:py-6 text-right">
+                    <p className="text-xs md:text-sm font-bold text-slate-900">{row.morningLiters.toFixed(1)} <span className="text-[9px] uppercase">L</span></p>
+                  </td>
+                  <td className="px-4 md:px-10 py-3 md:py-6 text-right">
+                    <p className="text-xs md:text-sm font-bold text-slate-900">{row.eveningLiters.toFixed(1)} <span className="text-[9px] uppercase">L</span></p>
+                  </td>
+                  <td className="px-4 md:px-10 py-3 md:py-6 text-right">
+                    <p className="text-xs md:text-sm font-bold text-slate-900">{row.totalLiters.toFixed(1)} <span className="text-[9px] uppercase">L</span></p>
+                  </td>
+                  <td className="px-4 md:px-10 py-3 md:py-6 text-right">
+                    <p className="text-[10px] font-bold text-slate-700">₹{row.rate}/L</p>
+                  </td>
+                  <td className="px-4 md:px-10 py-3 md:py-6 text-right font-display font-black text-emerald-600 text-base md:text-lg tracking-tight">₹{row.totalAmount.toFixed(0)}</td>
+                  <td className="px-4 md:px-10 py-3 md:py-6">
+                    <span className="inline-flex items-center px-2.5 py-1 rounded-lg bg-emerald-50 text-emerald-700 text-[11px] font-black uppercase tracking-widest">
+                      Paid
                     </span>
                   </td>
                   {isAdmin && (
-                    <td className="px-4 md:px-10 py-3 md:py-6">
-                      <div className="flex items-center gap-2">
-                        <div className="w-6 h-6 md:w-8 md:h-8 rounded-lg bg-slate-100 flex items-center justify-center text-slate-500 font-black text-[10px] uppercase">
-                          {entry.customer_name?.charAt(0)}
-                        </div>
-                        <span className="font-bold text-slate-700 text-xs md:text-sm tracking-tight truncate max-w-[80px] md:max-w-none">{entry.customer_name}</span>
-                      </div>
-                    </td>
-                  )}
-                  <td className="px-4 md:px-10 py-3 md:py-6">
-                    <p className="text-xs md:text-sm font-bold text-slate-900">{entry.liters.toFixed(1)} <span className="text-[9px] uppercase">L</span></p>
-                    <p className="text-[9px] md:text-[10px] text-slate-400 font-black uppercase tracking-widest leading-none mt-0.5">@ ₹{entry.rate}/L</p>
-                  </td>
-                  <td className="px-4 md:px-10 py-3 md:py-6 font-display font-black text-emerald-600 text-base md:text-lg tracking-tight">₹{entry.amount.toFixed(0)}</td>
-                  {isAdmin && (
                     <td className="px-4 md:px-10 py-3 md:py-6 text-right">
                       <button
-                        disabled={deletingId === entry.id}
-                        onClick={() => setShowConfirmModal(entry.id)}
+                        disabled={deletingId === row.id}
+                        onClick={() => setShowConfirmModal(row.id)}
                         className={`w-9 h-9 md:w-10 md:h-10 rounded-xl transition-all opacity-0 group-hover:opacity-100 flex items-center justify-center mx-auto md:ml-auto md:mr-0 touch-btn ${
-                          deletingId === entry.id 
+                          deletingId === row.id 
                             ? 'text-slate-200 bg-slate-50' 
                             : 'text-rose-400 hover:bg-rose-50 hover:text-rose-600 shadow-sm'
                         }`}
                       >
-                        <Trash2 size={16} className={deletingId === entry.id ? 'animate-pulse' : ''} />
+                        <Trash2 size={16} className={deletingId === row.id ? 'animate-pulse' : ''} />
                       </button>
                     </td>
                   )}
+
                 </tr>
               ))}
-              {filteredEntries.length === 0 && (
+              {monthEntriesGrouped.length === 0 && (
                 <tr>
-                  <td colSpan={isAdmin ? 6 : 4} className="py-16 md:py-32 text-center">
+                  <td colSpan={isAdmin ? 7 : 5} className="py-16 md:py-32 text-center">
                     <div className="w-14 h-14 md:w-20 md:h-20 rounded-2xl md:rounded-[2rem] bg-slate-50 flex items-center justify-center text-slate-200 mx-auto mb-4 md:mb-6">
                       <Droplets size={28} className="md:hidden" />
                       <Droplets size={40} className="hidden md:block" />
                     </div>
-                    <p className="text-sm md:text-lg font-display font-bold text-slate-400">{t('noEntriesYet')}</p>
-                    <p className="text-xs md:text-sm text-slate-300 font-medium">{t('noLogisticalEntries')}</p>
+                    <p className="text-sm md:text-lg font-display font-bold text-slate-400">No Entries Found</p>
+                    <p className="text-xs md:text-sm text-slate-300 font-medium">for {monthLabel}</p>
                   </td>
                 </tr>
               )}
+
             </tbody>
           </table>
         </div>
@@ -318,7 +663,7 @@ export default function MilkEntries({ customerId, isAdmin = true, defaultRate }:
           <motion.div 
             initial={{ opacity: 0, y: 40 }}
             animate={{ opacity: 1, y: 0 }}
-            className="bg-white rounded-t-3xl sm:rounded-[2.5rem] shadow-2xl w-full sm:max-w-md overflow-hidden border border-white/20"
+            className="bg-white rounded-t-3xl sm:rounded-[2.5rem] shadow-2xl w-full sm:max-w-md max-h-[calc(100vh-4rem)] sm:max-h-[calc(100vh-5rem)] overflow-hidden border border-white/20 flex flex-col"
           >
             {/* Drag handle on mobile */}
             <div className="w-10 h-1 bg-slate-200 rounded-full mx-auto mt-3 mb-1 sm:hidden" />

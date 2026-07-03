@@ -3,6 +3,7 @@ import { User, FileText, Info, LogOut, Phone, MapPin, Settings as SettingsIcon, 
 import { motion } from 'motion/react';
 import Billing from './Billing';
 import About from './About';
+import ContactUs from './ContactUs';
 import { getStoredLanguage, setStoredLanguage } from '../auth';
 import { useTranslation } from '../i18n';
 
@@ -19,7 +20,7 @@ interface SettingsProps {
   onLogout: () => void;
 }
 
-type TabType = 'profile' | 'reports' | 'about' | 'logout';
+type TabType = 'profile' | 'reports' | 'about' | 'contact' | 'logout';
 
 export default function Settings({ authData, onLogout }: SettingsProps) {
   const [activeTab, setActiveTab] = useState<TabType>('profile');
@@ -31,6 +32,7 @@ export default function Settings({ authData, onLogout }: SettingsProps) {
     { id: 'profile' as TabType, label: t('profileInfo'), icon: User },
     { id: 'reports' as TabType, label: authData.role === 'admin' ? t('reports') : 'My Reports', icon: FileText },
     { id: 'about' as TabType, label: t('about'), icon: Info },
+    { id: 'contact' as TabType, label: 'Contact Us', icon: Phone },
     { id: 'logout' as TabType, label: t('signOut'), icon: LogOut, className: 'text-rose-500 hover:bg-rose-50' },
   ];
 
@@ -225,6 +227,18 @@ export default function Settings({ authData, onLogout }: SettingsProps) {
               <About />
             </motion.div>
           )}
+
+          {/* Contact Tab */}
+          {activeTab === 'contact' && (
+            <motion.div
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="bg-white rounded-3xl border border-slate-100 p-2 md:p-6 shadow-soft"
+            >
+              <ContactUs />
+            </motion.div>
+          )}
+
 
           {/* Logout Tab (Confirmation dialog) */}
           {activeTab === 'logout' && showLogoutConfirm && (

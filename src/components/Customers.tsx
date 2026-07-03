@@ -1,8 +1,10 @@
 import React, { useState, useEffect } from 'react';
-import { Plus, Search, Edit2, Trash2, X, Milk, Phone, MapPin, User } from 'lucide-react';
+import { Plus, Edit2, Trash2, X, Milk, Phone, MapPin, User } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Customer } from '../types';
 import MilkEntries from './MilkEntries';
+import SearchBar from './SearchBar';
+import { useDebouncedValue } from '../hooks/useDebouncedValue';
 
 export default function Customers() {
   const [customers, setCustomers] = useState<Customer[]>([]);
@@ -10,6 +12,7 @@ export default function Customers() {
   const [historyCustomerId, setHistoryCustomerId] = useState<string | null>(null);
   const [editingCustomer, setEditingCustomer] = useState<Customer | null>(null);
   const [search, setSearch] = useState('');
+  const debouncedSearch = useDebouncedValue(search, 400);
 
   const [formData, setFormData] = useState({
     name: '',
@@ -55,22 +58,21 @@ export default function Customers() {
   };
 
   const filteredCustomers = customers.filter(c => 
-    c.name.toLowerCase().includes(search.toLowerCase()) ||
-    c.phone.includes(search)
+    c.name.toLowerCase().includes(debouncedSearch.toLowerCase()) ||
+    c.id.toLowerCase().includes(debouncedSearch.toLowerCase()) ||
+    c.phone.includes(debouncedSearch)
   );
 
   return (
     <div className="space-y-4 md:space-y-6">
       {/* Search + Add */}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div className="relative flex-1 sm:max-w-xs">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
-          <input
-            type="text"
-            placeholder="Search customers..."
+        <div className="flex-1 sm:max-w-xs">
+          <SearchBar
             value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="input-base pl-9 rounded-xl"
+            onChange={setSearch}
+            placeholder="Search customers by name or ID..."
+            className="w-full"
           />
         </div>
         <button

@@ -602,13 +602,28 @@ async function startServer() {
     app.get("*", (_req, res) => res.sendFile(path.join(__dirname, "dist", "index.html")));
   }
 
-  app.listen(PORT, "0.0.0.0", () => {
+  const server = app.listen(PORT, "0.0.0.0", () => {
     console.log(`✅ Server running on http://localhost:${PORT}`);
     const adminPass = (process.env.ADMIN_PASSWORD || "admin123").trim();
     if (adminPass === "admin123") {
       console.log("⚠️  WARNING: Using default credentials! Change ADMIN_PASSWORD in env vars.");
     }
   });
+
+  server.on('error', (error: any) => {
+    if (error?.code === 'EADDRINUSE') {
+      console.error(`❌ Port ${PORT} is already in use. Set a different PORT or stop the process using that port.`);
+      if (process.env.PORT) {
+        console.error(`   Current PORT environment variable: ${process.env.PORT}`);
+      }
+      process.exit(1);
+    }
+    console.error('Server error:', error);
+    process.exit(1);
+  });
 }
 
-startServer().catch(console.error);
+startServer().catch((err) => {
+  console.error('Startup failed:', err);
+  process.exit(1);
+});
