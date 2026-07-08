@@ -236,15 +236,16 @@ export default function Customers() {
       {/* Add/Edit Modal */}
       <AnimatePresence>
         {isModalOpen && (
-          <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-end sm:items-center justify-center p-0 sm:p-4">
+          <div className="sheet-overlay">
             <motion.div
-              initial={{ opacity: 0, y: 40 }}
+              initial={{ opacity: 0, y: 60 }}
               animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: 40 }}
-              className="bg-white rounded-t-3xl sm:rounded-2xl shadow-xl w-full sm:max-w-md overflow-hidden"
+              exit={{ opacity: 0, y: 60 }}
+              transition={{ type: 'spring', stiffness: 340, damping: 30 }}
+              className="sheet-panel"
             >
               <div className="w-10 h-1 bg-slate-200 rounded-full mx-auto mt-3 mb-1 sm:hidden" />
-              <div className="p-5 border-b border-slate-100 flex justify-between items-center">
+              <div className="flex-shrink-0 p-5 border-b border-slate-100 flex justify-between items-center">
                 <h3 className="text-lg font-bold text-slate-800">
                   {editingCustomer ? 'Edit Customer' : 'Add New Customer'}
                 </h3>
@@ -252,7 +253,9 @@ export default function Customers() {
                   <X size={20} />
                 </button>
               </div>
-              <form onSubmit={handleSubmit} className="p-5 space-y-3.5 modal-scroll">
+              <form onSubmit={handleSubmit} className="flex flex-col flex-1 overflow-hidden">
+                <div className="sheet-body">
+                  <div className="p-5 space-y-3.5">
                 <div>
                   <label className="block text-xs font-semibold text-slate-700 mb-1.5">Full Name</label>
                   <input
@@ -332,10 +335,19 @@ export default function Customers() {
                     className="input-base"
                   />
                 </div>
-                <div className="pt-2">
+                  </div> {/* end padding div */}
+                </div> {/* end sheet-body */}
+                <div className="sheet-footer flex gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setIsModalOpen(false)}
+                    className="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-500 py-3.5 rounded-xl font-bold transition-all text-sm touch-btn"
+                  >
+                    Cancel
+                  </button>
                   <button
                     type="submit"
-                    className="w-full bg-emerald-600 text-white py-3.5 rounded-xl font-bold hover:bg-emerald-700 transition-colors shadow-md text-sm touch-btn"
+                    className="flex-[2] bg-emerald-600 text-white py-3.5 rounded-xl font-bold hover:bg-emerald-700 transition-colors shadow-md text-sm touch-btn"
                   >
                     {editingCustomer ? 'Update Customer' : 'Save Customer'}
                   </button>

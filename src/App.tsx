@@ -550,7 +550,7 @@ export default function App() {
 
       {/* Mobile Bottom Navigation */}
       {isMobile && (
-        <nav className="fixed bottom-0 left-0 right-0 z-50 bg-white/98 backdrop-blur-xl border-t border-slate-100 shadow-[0_-4px_24px_rgba(0,0,0,0.08)] safe-area-inset-bottom">
+        <nav className="fixed bottom-0 left-0 right-0 z-[85] bg-white/98 backdrop-blur-xl border-t border-slate-100 shadow-[0_-4px_24px_rgba(0,0,0,0.08)] safe-area-inset-bottom">
           <div className="flex items-stretch">
             {navItems.map((item) => {
               const Icon = item.icon;

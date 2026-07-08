@@ -94,15 +94,100 @@
 
 /* ── Modal: always fits on small screens ─────────────────────── */
 .modal-scroll {
-  max-height: calc(100vh - 10rem);
+  max-height: calc(100vh - 12rem);
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
 }
 
 @media (max-width: 640px) {
   .modal-scroll {
-    max-height: calc(100vh - 7rem);
+    /* 80% of viewport, minus bottom nav (64px) and safe area */
+    max-height: calc(80dvh - 64px - env(safe-area-inset-bottom, 0px));
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
   }
+}
+
+/* ── Bottom Sheet wrapper ─────────────────────────────────────── */
+/* Usage: overlay div gets class "sheet-overlay"                  */
+/*        inner motion.div gets class "sheet-panel"               */
+.sheet-overlay {
+  position: fixed;
+  inset: 0;
+  bottom: 0;
+  z-index: 80;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  background: rgba(15, 23, 42, 0.45);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  /* Push panel above bottom nav without any visual gaps */
+  padding-bottom: calc(64px + env(safe-area-inset-bottom, 0px));
+}
+
+@media (min-width: 641px) {
+  .sheet-overlay {
+    /* Desktop: full-screen centered dialog */
+    bottom: 0;
+    align-items: center;
+    padding: 1rem;
+  }
+}
+
+/* The sheet panel itself */
+.sheet-panel {
+  width: 100%;
+  background: #fff;
+  border-radius: 1.5rem 1.5rem 0 0;
+  box-shadow: 0 -8px 40px rgba(0,0,0,0.12);
+  /* Cap height so it never bleeds behind bottom nav */
+  max-height: calc(82dvh - 64px - env(safe-area-inset-bottom, 0px));
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid rgba(255,255,255,0.2);
+}
+
+@media (min-width: 641px) {
+  .sheet-panel {
+    border-radius: 2rem;
+    max-width: 28rem;   /* sm:max-w-md */
+    max-height: calc(100vh - 5rem);
+  }
+}
+
+/* Scrollable body inside the sheet */
+.sheet-body {
+  flex: 1;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+}
+
+/* Fixed footer inside sheet (Save/Cancel buttons) */
+.sheet-footer {
+  flex-shrink: 0;
+  padding: 1rem 1.25rem;
+  border-top: 1px solid #f1f5f9;
+  background: #fff;
+}
+
+/* ── Full-screen centered modals (confirm / history) ─────────── */
+/* These need to keep z-index ABOVE the nav bar                   */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+  background: rgba(15, 23, 42, 0.5);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
 }
 
 /* ── Page title sizes ────────────────────────────────────────── */

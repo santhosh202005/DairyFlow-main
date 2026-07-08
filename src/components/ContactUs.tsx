@@ -28,12 +28,7 @@ export default function ContactUs() {
   const { t } = useTranslation();
   const [copied, setCopied] = useState<string | null>(null);
 
-  const mapLink = useMemo(() => {
-    const q = encodeURIComponent(
-      'No. 16, Kannadiyar Street, Karungalikuppam, Ranipet District – 632507, Tamil Nadu, India'
-    );
-    return `https://www.google.com/maps/search/?api=1&query=${q}`;
-  }, []);
+
 
   const onCopy = async (value: string) => {
     try {
@@ -155,14 +150,7 @@ export default function ContactUs() {
 
                 <div className="text-slate-700 font-medium whitespace-pre-line leading-relaxed">{business.address}</div>
 
-                <a
-                  href={mapLink}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="mt-4 inline-flex w-full sm:w-auto items-center justify-center gap-2 px-5 py-3 rounded-xl bg-slate-900 text-white font-bold text-sm hover:bg-slate-800 transition-all shadow-sm touch-btn"
-                >
-                  <Map size={16} /> Open in Google Maps
-                </a>
+
               </div>
             </div>
           </div>

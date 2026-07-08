@@ -147,7 +147,7 @@ export default function Advances({ customerId, isAdmin = true }: AdvancesProps) 
       {/* Delete Confirmation */}
       <AnimatePresence>
         {showConfirmModal !== null && (
-          <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
+          <div className="modal-overlay">
             <motion.div 
               initial={{ scale: 0.9, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
@@ -358,14 +358,16 @@ export default function Advances({ customerId, isAdmin = true }: AdvancesProps) 
 
       {/* New Transaction Modal */}
       {isModalOpen && (
-        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-md z-50 flex items-end sm:items-center justify-center p-0 sm:p-4">
+        <div className="sheet-overlay">
           <motion.div 
-            initial={{ opacity: 0, y: 40 }}
+            initial={{ opacity: 0, y: 60 }}
             animate={{ opacity: 1, y: 0 }}
-            className="bg-white rounded-t-3xl sm:rounded-[2.5rem] shadow-2xl w-full sm:max-w-md overflow-hidden border border-white/20"
+            exit={{ opacity: 0, y: 60 }}
+            transition={{ type: 'spring', stiffness: 340, damping: 30 }}
+            className="sheet-panel"
           >
             <div className="w-10 h-1 bg-slate-200 rounded-full mx-auto mt-3 mb-1 sm:hidden" />
-            <div className="p-5 sm:p-8 border-b border-slate-50 flex justify-between items-center">
+            <div className="flex-shrink-0 p-5 sm:p-8 border-b border-slate-50 flex justify-between items-center">
               <div>
                 <h3 className="text-lg sm:text-2xl font-display font-bold text-slate-900 tracking-tight">{t('newTransaction')}</h3>
                 <p className="text-[10px] text-slate-400 font-black uppercase tracking-widest mt-0.5">{t('financialReconciliation')}</p>
@@ -377,8 +379,9 @@ export default function Advances({ customerId, isAdmin = true }: AdvancesProps) 
                 <Plus size={20} className="rotate-45" />
               </button>
             </div>
-            
-            <form onSubmit={handleSubmit} className="p-5 sm:p-8 space-y-4 sm:space-y-8 modal-scroll">
+            <form onSubmit={handleSubmit} className="flex flex-col flex-1 overflow-hidden">
+              <div className="sheet-body">
+                <div className="p-5 sm:p-8 space-y-4 sm:space-y-8">
               {/* Type Toggle */}
                 <div className="p-1 bg-slate-100 rounded-xl flex gap-1">
                 <button
@@ -511,12 +514,23 @@ export default function Advances({ customerId, isAdmin = true }: AdvancesProps) 
                 </motion.div>
               )}
 
-              <button
-                type="submit"
-                className="w-full bg-slate-900 text-white py-4 sm:py-5 rounded-xl sm:rounded-[1.5rem] font-black uppercase tracking-[0.2em] text-xs hover:bg-slate-800 transition-all shadow-xl hover:shadow-slate-200 active:scale-95 touch-btn"
-              >
-                {t('commitTransaction')}
-              </button>
+                </div> {/* end padding div */}
+              </div> {/* end sheet-body */}
+              <div className="sheet-footer flex gap-3">
+                <button
+                  type="button"
+                  onClick={() => setIsModalOpen(false)}
+                  className="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-500 py-4 rounded-xl font-black uppercase tracking-[0.2em] text-xs transition-all active:scale-95 touch-btn"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="flex-[2] bg-slate-900 text-white py-4 rounded-xl font-black uppercase tracking-[0.2em] text-xs hover:bg-slate-800 transition-all shadow-xl active:scale-95 touch-btn"
+                >
+                  {t('commitTransaction')}
+                </button>
+              </div>
             </form>
           </motion.div>
         </div>

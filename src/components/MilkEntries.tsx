@@ -35,7 +35,6 @@ export default function MilkEntries({ customerId, isAdmin = true, defaultRate }:
     return `${selectedYear}-${mm}`;
   }, [selectedMonthIndex, selectedYear]);
 
-  const [query, setQuery] = useState('');
   const [dateInMonth, setDateInMonth] = useState<string>('');
   const [paymentStatusFilter, setPaymentStatusFilter] = useState<'all'>('all');
 
@@ -74,7 +73,7 @@ export default function MilkEntries({ customerId, isAdmin = true, defaultRate }:
 
   useEffect(() => {
     setPage(1);
-  }, [selectedMonthKey, query, sortBy, sortDir, dateInMonth, paymentStatusFilter, pageSize, customerId]);
+  }, [selectedMonthKey, sortBy, sortDir, dateInMonth, paymentStatusFilter, pageSize, customerId]);
 
   const fetchEntries = () => {
     setIsLoadingEntries(true);
@@ -95,29 +94,10 @@ export default function MilkEntries({ customerId, isAdmin = true, defaultRate }:
   }, [customerId, isAdmin]);
 
   const filteredEntries = useMemo(() => {
-    const q = query.trim().toLowerCase();
-
     let res = entries.filter((entry) => entry.date.startsWith(selectedMonthKey));
 
     if (dateInMonth) {
       res = res.filter((e) => e.date === dateInMonth);
-    }
-
-    if (q) {
-      res = res.filter((e) => {
-        const dateStr = new Date(e.date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }).toLowerCase();
-        return (
-          e.customer_name?.toLowerCase().includes(q) ||
-          e.customer_id?.toLowerCase().includes(q) ||
-          String(e.rate).includes(q) ||
-          dateStr.includes(q)
-        );
-      });
-    }
-
-    if (paymentStatusFilter !== 'all') {
-      // backend currently does not return payment status in MilkEntry type
-      // leaving filter placeholder to keep UI consistent
     }
 
     res = res.slice();
@@ -143,7 +123,7 @@ export default function MilkEntries({ customerId, isAdmin = true, defaultRate }:
     });
 
     return res;
-  }, [entries, selectedMonthKey, query, dateInMonth, paymentStatusFilter, sortBy, sortDir]);
+  }, [entries, selectedMonthKey, dateInMonth, paymentStatusFilter, sortBy, sortDir]);
 
   const pagedEntries = useMemo(() => {
     const start = (page - 1) * pageSize;
@@ -361,29 +341,7 @@ export default function MilkEntries({ customerId, isAdmin = true, defaultRate }:
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-          <div className="md:col-span-2">
-            <div className="search-bar w-full">
-              <Search className="search-icon text-slate-400" />
-              <input
-                className="search-input"
-                placeholder="Search by customer, date or rate..."
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-              />
-              {query && (
-                <button
-                  type="button"
-                  className="search-clear-button"
-                  onClick={() => setQuery('')}
-                  aria-label="Clear search"
-                >
-                  <span className="text-lg leading-none">×</span>
-                </button>
-              )}
-            </div>
-          </div>
-
-          <div className="flex gap-3">
+          <div className="flex gap-3 md:col-span-1">
             <div className="flex-1">
               <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1 px-1">Date</label>
               <div className="relative group">
@@ -453,7 +411,7 @@ export default function MilkEntries({ customerId, isAdmin = true, defaultRate }:
       {(
         isAdmin || Boolean(customerId)
       ) && (
-        <div className="sm:hidden fixed bottom-0 right-0 z-[70] px-3 pb-4 pt-2 safe-area-inset-bottom">
+        <div className="sm:hidden fixed bottom-24 right-4 z-[90] px-3 pb-4 pt-2 safe-area-inset-bottom">
           <button
             onClick={() => {
               setFormData(prev => ({
@@ -477,7 +435,7 @@ export default function MilkEntries({ customerId, isAdmin = true, defaultRate }:
       <AnimatePresence>
 
         {showConfirmModal !== null && (
-          <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-md z-[100] flex items-center justify-center p-4">
+          <div className="modal-overlay">
             <motion.div 
               initial={{ scale: 0.9, opacity: 0, y: 20 }}
               animate={{ scale: 1, opacity: 1, y: 0 }}
@@ -508,6 +466,7 @@ export default function MilkEntries({ customerId, isAdmin = true, defaultRate }:
           </div>
         )}
       </AnimatePresence>
+      {/* Loading */}
       {/* Loading */}
       {isLoadingEntries && (
         <div className="bg-white rounded-2xl md:rounded-[2.5rem] shadow-soft border border-slate-100 p-8 text-center">
@@ -659,16 +618,19 @@ export default function MilkEntries({ customerId, isAdmin = true, defaultRate }:
 
       {/* Modal */}
       {isModalOpen && (
-        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-md z-50 flex items-end sm:items-center justify-center p-0 sm:p-4">
+        <div className="sheet-overlay">
           <motion.div 
-            initial={{ opacity: 0, y: 40 }}
+            initial={{ opacity: 0, y: 60 }}
             animate={{ opacity: 1, y: 0 }}
-            className="bg-white rounded-t-3xl sm:rounded-[2.5rem] shadow-2xl w-full sm:max-w-md max-h-[calc(100vh-4rem)] sm:max-h-[calc(100vh-5rem)] overflow-hidden border border-white/20 flex flex-col"
+            exit={{ opacity: 0, y: 60 }}
+            transition={{ type: 'spring', stiffness: 340, damping: 30 }}
+            className="sheet-panel"
           >
-            {/* Drag handle on mobile */}
-            <div className="w-10 h-1 bg-slate-200 rounded-full mx-auto mt-3 mb-1 sm:hidden" />
-            
-            <div className="p-5 sm:p-8 border-b border-slate-50 flex justify-between items-center">
+            {/* Drag handle */}
+            <div className="w-10 h-1 bg-slate-200 rounded-full mx-auto mt-3 mb-1 sm:hidden flex-shrink-0" />
+
+            {/* Fixed header */}
+            <div className="flex-shrink-0 px-5 sm:px-8 py-4 border-b border-slate-50 flex justify-between items-center">
               <div>
                 <h3 className="text-lg sm:text-2xl font-display font-bold text-slate-900 tracking-tight">{t('milkEntry')}</h3>
                 <p className="text-[10px] text-slate-400 font-black uppercase tracking-widest mt-0.5">{t('supplyReconciliation')}</p>
@@ -680,8 +642,11 @@ export default function MilkEntries({ customerId, isAdmin = true, defaultRate }:
                 <Plus size={20} className="rotate-45" />
               </button>
             </div>
-            
-            <form onSubmit={handleSubmit} className="p-5 sm:p-8 space-y-4 sm:space-y-8 modal-scroll">
+
+            {/* Scrollable body + fixed footer */}
+            <form onSubmit={handleSubmit} className="flex flex-col flex-1 overflow-hidden">
+              <div className="sheet-body">
+                <div className="p-5 sm:p-8 space-y-4 sm:space-y-6">
               {error && (
                 <motion.div 
                   initial={{ opacity: 0, x: -10 }}
@@ -789,29 +754,42 @@ export default function MilkEntries({ customerId, isAdmin = true, defaultRate }:
                   </div>
                 </div>
               </div>
+            </div>  {/* end padding div */}
 
-              <div className="p-4 rounded-2xl bg-emerald-900 text-white shadow-2xl relative overflow-hidden group">
-                <div className="absolute -right-4 -top-4 w-24 h-24 bg-white/5 rounded-full blur-2xl" />
-                <div className="flex justify-between items-center relative z-10">
-                  <div>
-                    <p className="text-[9px] font-black uppercase tracking-[0.2em] text-emerald-400 mb-0.5">Estimated Valuation</p>
-                    <p className="text-2xl sm:text-4xl font-display font-bold tracking-tight">
-                      ₹{formData.liters ? (parseFloat(formData.liters) * currentRate).toFixed(0) : '0'}
-                    </p>
-                  </div>
-                  <div className="text-right">
-                    <p className="text-[9px] font-black uppercase tracking-widest text-emerald-500">Active Rate</p>
-                    <p className="text-sm font-bold text-emerald-400">₹{currentRate}/L</p>
+                {/* Valuation card */}
+                <div className="mx-5 sm:mx-8 mb-4 p-4 rounded-2xl bg-emerald-900 text-white shadow-2xl relative overflow-hidden">
+                  <div className="absolute -right-4 -top-4 w-24 h-24 bg-white/5 rounded-full blur-2xl" />
+                  <div className="flex justify-between items-center relative z-10">
+                    <div>
+                      <p className="text-[9px] font-black uppercase tracking-[0.2em] text-emerald-400 mb-0.5">Estimated Valuation</p>
+                      <p className="text-2xl sm:text-4xl font-display font-bold tracking-tight">
+                        ₹{formData.liters ? (parseFloat(formData.liters) * currentRate).toFixed(0) : '0'}
+                      </p>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-[9px] font-black uppercase tracking-widest text-emerald-500">Active Rate</p>
+                      <p className="text-sm font-bold text-emerald-400">₹{currentRate}/L</p>
+                    </div>
                   </div>
                 </div>
-              </div>
+              </div> {/* end sheet-body */}
 
-              <button
-                type="submit"
-                className="w-full bg-slate-900 text-white py-4 sm:py-5 rounded-xl sm:rounded-[1.5rem] font-black uppercase tracking-[0.2em] text-xs hover:bg-slate-800 transition-all shadow-xl hover:shadow-slate-200 active:scale-95 touch-btn"
-              >
-                {t('recordEntry')}
-              </button>
+              {/* Fixed footer */}
+              <div className="sheet-footer flex gap-3">
+                <button
+                  type="button"
+                  onClick={() => setIsModalOpen(false)}
+                  className="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-500 py-4 rounded-xl font-black uppercase tracking-[0.2em] text-xs transition-all active:scale-95 touch-btn"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="flex-[2] bg-slate-900 text-white py-4 rounded-xl font-black uppercase tracking-[0.2em] text-xs hover:bg-slate-800 transition-all shadow-xl active:scale-95 touch-btn"
+                >
+                  {t('recordEntry')}
+                </button>
+              </div>
             </form>
           </motion.div>
         </div>

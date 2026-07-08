@@ -1,7 +1,14 @@
-import React from 'react';
-import { Info, ShieldCheck, Zap, Heart } from 'lucide-react';
+import React, { useState } from 'react';
+import { Info, ShieldCheck, Zap, Heart, X, Phone, Copy, MapPin, Building2, User } from 'lucide-react';
 
 export default function About() {
+  const [showSupport, setShowSupport] = useState(false);
+
+  const handleCopyPhone = () => {
+    navigator.clipboard.writeText('+91 9042141951, +91 9047261367');
+    alert('Phone numbers copied to clipboard!');
+  };
+
   return (
     <div className="max-w-4xl mx-auto space-y-12 py-8">
       <section className="text-center space-y-4">
@@ -67,7 +74,10 @@ export default function About() {
           <div className="px-6 py-3 bg-emerald-600 hover:bg-emerald-700 rounded-xl font-bold transition-colors cursor-pointer">
             Get Started
           </div>
-          <div className="px-6 py-3 border border-slate-700 hover:bg-slate-800 rounded-xl font-bold transition-colors cursor-pointer">
+          <div 
+            onClick={() => setShowSupport(true)}
+            className="px-6 py-3 border border-slate-700 hover:bg-slate-800 rounded-xl font-bold transition-colors cursor-pointer"
+          >
             Contact Support
           </div>
         </div>
@@ -76,6 +86,88 @@ export default function About() {
       <footer className="text-center text-slate-400 text-sm">
         <p>© 2026 DairyFlow Management System. All rights reserved.</p>
       </footer>
+
+      {showSupport && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
+          <div className="bg-white rounded-[2rem] w-full max-w-md overflow-hidden shadow-2xl relative animate-in fade-in zoom-in duration-200">
+            <div className="p-6 md:p-8 space-y-6">
+              <div className="flex justify-between items-center">
+                <h3 className="text-2xl font-bold text-slate-900">Contact Support</h3>
+                <button 
+                  onClick={() => setShowSupport(false)}
+                  className="w-10 h-10 flex items-center justify-center rounded-full bg-slate-100 text-slate-500 hover:bg-slate-200 transition-colors"
+                >
+                  <X size={20} />
+                </button>
+              </div>
+
+              <div className="space-y-4">
+                <div className="flex items-start gap-4">
+                  <div className="w-10 h-10 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center shrink-0">
+                    <User size={20} />
+                  </div>
+                  <div>
+                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-0.5">Administrator</p>
+                    <p className="font-bold text-slate-900">Rajini</p>
+                  </div>
+                </div>
+
+                <div className="flex items-start gap-4">
+                  <div className="w-10 h-10 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center shrink-0">
+                    <Building2 size={20} />
+                  </div>
+                  <div>
+                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-0.5">Business</p>
+                    <p className="font-bold text-slate-900">Dairy Flow</p>
+                    <p className="text-sm font-medium text-slate-500">Since 1970</p>
+                  </div>
+                </div>
+
+                <div className="flex items-start gap-4">
+                  <div className="w-10 h-10 rounded-xl bg-violet-50 text-violet-600 flex items-center justify-center shrink-0">
+                    <Phone size={20} />
+                  </div>
+                  <div>
+                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-0.5">Phone Numbers</p>
+                    <p className="font-bold text-slate-900">+91 9042141951</p>
+                    <p className="font-bold text-slate-900">+91 9047261367</p>
+                  </div>
+                </div>
+
+                <div className="flex items-start gap-4">
+                  <div className="w-10 h-10 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center shrink-0">
+                    <MapPin size={20} />
+                  </div>
+                  <div>
+                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-0.5">Address</p>
+                    <p className="font-bold text-slate-900 text-sm leading-relaxed">
+                      No. 16, Kannadiyar Street,<br/>
+                      Karungalikuppam,<br/>
+                      Ranipet District – 632507,<br/>
+                      Tamil Nadu, India.
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="pt-4 border-t border-slate-100 flex flex-col sm:flex-row gap-3">
+                <a 
+                  href="tel:+919042141951"
+                  className="flex-1 bg-emerald-600 text-white flex items-center justify-center gap-2 py-3 rounded-xl font-bold shadow-lg shadow-emerald-100 hover:bg-emerald-700 active:scale-95 transition-all"
+                >
+                  <Phone size={18} /> Call Administrator
+                </a>
+                <button 
+                  onClick={handleCopyPhone}
+                  className="flex-1 bg-white border-2 border-slate-200 text-slate-700 flex items-center justify-center gap-2 py-3 rounded-xl font-bold hover:bg-slate-50 hover:border-slate-300 active:scale-95 transition-all"
+                >
+                  <Copy size={18} /> Copy Phone
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
