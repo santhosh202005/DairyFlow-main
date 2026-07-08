@@ -1,9 +1,10 @@
 import { useState } from 'react';
-import { User, FileText, Info, LogOut, Phone, MapPin, Settings as SettingsIcon, Shield } from 'lucide-react';
+import { User, FileText, Info, LogOut, MapPin, Settings as SettingsIcon, Shield } from 'lucide-react';
+
 import { motion } from 'motion/react';
 import Billing from './Billing';
 import About from './About';
-import ContactUs from './ContactUs';
+
 import { getStoredLanguage, setStoredLanguage } from '../auth';
 import { useTranslation } from '../i18n';
 
@@ -20,7 +21,8 @@ interface SettingsProps {
   onLogout: () => void;
 }
 
-type TabType = 'profile' | 'reports' | 'about' | 'contact' | 'logout';
+type TabType = 'profile' | 'reports' | 'about' | 'logout';
+
 
 export default function Settings({ authData, onLogout }: SettingsProps) {
   const [activeTab, setActiveTab] = useState<TabType>('profile');
@@ -32,9 +34,9 @@ export default function Settings({ authData, onLogout }: SettingsProps) {
     { id: 'profile' as TabType, label: t('profileInfo'), icon: User },
     { id: 'reports' as TabType, label: authData.role === 'admin' ? t('reports') : 'My Reports', icon: FileText },
     { id: 'about' as TabType, label: t('about'), icon: Info },
-    { id: 'contact' as TabType, label: 'Contact Us', icon: Phone },
     { id: 'logout' as TabType, label: t('signOut'), icon: LogOut, className: 'text-rose-500 hover:bg-rose-50' },
   ];
+
 
   return (
     <div className="flex flex-col lg:flex-row gap-8 items-start min-h-[600px]">
@@ -61,12 +63,13 @@ export default function Settings({ authData, onLogout }: SettingsProps) {
                 key={tab.id}
                 onClick={() => {
                   if (tab.id === 'logout') {
-                    setActiveTab('logout');
+            setActiveTab('logout');
                     setShowLogoutConfirm(true);
                   } else {
                     setActiveTab(tab.id);
                     setShowLogoutConfirm(false);
                   }
+
                 }}
                 className={`flex items-center gap-3 px-4 py-3.5 rounded-2xl font-bold text-sm transition-all whitespace-nowrap lg:w-full relative group cursor-pointer ${
                   tab.id === 'logout' && !isActive
@@ -229,15 +232,7 @@ export default function Settings({ authData, onLogout }: SettingsProps) {
           )}
 
           {/* Contact Tab */}
-          {activeTab === 'contact' && (
-            <motion.div
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              className="bg-white rounded-3xl border border-slate-100 p-2 md:p-6 shadow-soft"
-            >
-              <ContactUs />
-            </motion.div>
-          )}
+
 
 
           {/* Logout Tab (Confirmation dialog) */}
