@@ -219,7 +219,13 @@ async function startServer() {
     }
     const token = authHeader.replace("Bearer ", "");
     if (token === "admin-token") {
-      return res.json({ success: true, role: "admin", username: "admin" });
+      return res.json({
+        success: true,
+        role: "admin",
+        username: "admin",
+        customerPhone: "9042141951",
+        customerAddress: "Arcot",
+      });
     }
     if (token.startsWith("customer-token-")) {
       const customerId = token.replace("customer-token-", "");

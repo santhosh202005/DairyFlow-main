@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { User, FileText, Info, LogOut, MapPin, Settings as SettingsIcon, Shield } from 'lucide-react';
+import { User, FileText, Info, LogOut, MapPin, Phone, Settings as SettingsIcon, Shield } from 'lucide-react';
 
 import { motion } from 'motion/react';
 import Billing from './Billing';
@@ -159,7 +159,7 @@ export default function Settings({ authData, onLogout }: SettingsProps) {
                       <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">{t('contactPhone')}</p>
                       <div className="flex items-center gap-2 text-sm font-bold text-slate-800">
                         <Phone size={14} className="text-slate-400" />
-                        <span>{authData.customerPhone || 'Not Provided'}</span>
+                        <span>{authData.customerPhone || (authData.role === 'admin' ? '9042141951' : 'Not Provided')}</span>
                       </div>
                     </div>
                   </div>
@@ -182,7 +182,7 @@ export default function Settings({ authData, onLogout }: SettingsProps) {
                       <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">{t('registeredAddress')}</p>
                       <div className="flex items-start gap-2 text-sm font-bold text-slate-800">
                         <MapPin size={14} className="text-slate-400 mt-0.5 shrink-0" />
-                        <span className="leading-relaxed">{authData.customerAddress || t('noAddressProvided')}</span>
+                        <span className="leading-relaxed">{authData.customerAddress || (authData.role === 'admin' ? 'Arcot' : t('noAddressProvided'))}</span>
                       </div>
                     </div>
 

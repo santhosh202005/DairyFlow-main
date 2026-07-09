@@ -89,6 +89,8 @@ export default function App() {
   const [serverStatus, setServerStatus] = useState<'checking' | 'starting' | 'ready'>('checking');
   const [errorMsg, setErrorMsg] = useState('');
 
+  const { t } = useTranslation();
+
   const handleLogout = () => {
     clearAuth();
     setActiveView('dashboard');
@@ -327,7 +329,6 @@ export default function App() {
     return <Login onLogin={handleLogin} />;
   }
 
-  const { t } = useTranslation();
   const navLabel = (key: string, fallback: string) => t(key) || fallback;
 
   const navItems = [

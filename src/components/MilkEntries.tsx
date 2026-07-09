@@ -387,32 +387,15 @@ export default function MilkEntries({ customerId, isAdmin = true, defaultRate }:
         </div>
       </div>
 
-      {/* Fixed Add Entry: desktop */}
-      {(
-        isAdmin || Boolean(customerId)
-      ) && (
-        <button
-          onClick={() => {
-            setFormData(prev => ({
-              ...prev,
-              customer_id: customerId ? customerId.toString() : prev.customer_id,
-              date: new Date().toISOString().split('T')[0],
-            }));
-            setIsModalOpen(true);
-          }}
-          className="hidden sm:flex fixed top-24 right-6 z-[60] items-center gap-2 bg-emerald-600 text-white px-4 py-3 rounded-2xl font-black shadow-lg shadow-emerald-100 hover:bg-emerald-700 transition-all active:scale-95 touch-btn"
-          aria-label="Add entry"
-        >
-          <Plus size={18} /> {t('newEntry')}
-        </button>
-      )}
-
-      {/* Sticky Add Entry: mobile */}
-      {(
-        isAdmin || Boolean(customerId)
-      ) && (
-        <div className="sm:hidden fixed bottom-24 right-4 z-[90] px-3 pb-4 pt-2 safe-area-inset-bottom">
-          <button
+      {/* Fixed Add Entry: desktop — hidden while sheet is open */}
+      <AnimatePresence>
+        {(isAdmin || Boolean(customerId)) && !isModalOpen && (
+          <motion.button
+            key="fab-desktop"
+            initial={{ opacity: 0, scale: 0.85 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.85 }}
+            transition={{ duration: 0.18, ease: 'easeInOut' }}
             onClick={() => {
               setFormData(prev => ({
                 ...prev,
@@ -421,15 +404,44 @@ export default function MilkEntries({ customerId, isAdmin = true, defaultRate }:
               }));
               setIsModalOpen(true);
             }}
-            className="w-auto bg-emerald-600 text-white px-4 py-3 rounded-2xl font-black shadow-lg shadow-emerald-100 hover:bg-emerald-700 transition-all active:scale-95 touch-btn"
+            className="hidden sm:flex fixed top-24 right-6 z-[60] items-center gap-2 bg-emerald-600 text-white px-4 py-3 rounded-2xl font-black shadow-lg shadow-emerald-100 hover:bg-emerald-700 transition-colors active:scale-95 touch-btn"
             aria-label="Add entry"
           >
-            <span className="inline-flex items-center justify-center gap-2">
-              <Plus size={18} /> {t('newEntry')}
-            </span>
-          </button>
-        </div>
-      )}
+            <Plus size={18} /> {t('newEntry')}
+          </motion.button>
+        )}
+      </AnimatePresence>
+
+      {/* Sticky Add Entry: mobile — hidden while sheet is open */}
+      <AnimatePresence>
+        {(isAdmin || Boolean(customerId)) && !isModalOpen && (
+          <motion.div
+            key="fab-mobile"
+            initial={{ opacity: 0, y: 16 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 16 }}
+            transition={{ duration: 0.18, ease: 'easeInOut' }}
+            className="sm:hidden fixed bottom-24 right-4 z-[90] px-3 pb-4 pt-2 safe-area-inset-bottom"
+          >
+            <button
+              onClick={() => {
+                setFormData(prev => ({
+                  ...prev,
+                  customer_id: customerId ? customerId.toString() : prev.customer_id,
+                  date: new Date().toISOString().split('T')[0],
+                }));
+                setIsModalOpen(true);
+              }}
+              className="w-auto bg-emerald-600 text-white px-4 py-3 rounded-2xl font-black shadow-lg shadow-emerald-100 hover:bg-emerald-700 transition-colors active:scale-95 touch-btn"
+              aria-label="Add entry"
+            >
+              <span className="inline-flex items-center justify-center gap-2">
+                <Plus size={18} /> {t('newEntry')}
+              </span>
+            </button>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
 
       <AnimatePresence>
@@ -616,7 +628,7 @@ export default function MilkEntries({ customerId, isAdmin = true, defaultRate }:
         ))}
       </div>
 
-      {/* Modal */}
+      {/* Bottom Sheet */}
       {isModalOpen && (
         <div className="sheet-overlay">
           <motion.div 

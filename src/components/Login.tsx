@@ -87,7 +87,7 @@ export default function Login({ onLogin }: LoginProps) {
 
       if (response.ok && data.success) {
         setIsOtpSent(true);
-        setMessage('OTP has been sent to your phone number! (Check server console for test OTP)');
+        setMessage('OTP has been sent to your phone number! Check the server console for the OTP.');
       } else {
         setError(data.message || 'Failed to send OTP. Please make sure the number is registered.');
       }
