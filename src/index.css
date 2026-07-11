@@ -1,20 +1,33 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,100..900;1,14..32,100..900&family=Space+Grotesk:wght@300..700&display=swap');
+/* ── DairyFlow Font System ─────────────────────────────────────────────────── */
+/*                                                                              */
+/*  --font-brand   : Outfit         → Logo, app name, brand text               */
+/*  --font-display : Plus Jakarta Sans → Page titles, section headings         */
+/*  --font-sans    : Inter          → Body text, labels, paragraphs            */
+/*  --font-mono    : JetBrains Mono → Numbers, amounts, IDs, code              */
+/*                                                                              */
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800;900&family=Plus+Jakarta+Sans:ital,wght@0,300;0,400;0,500;0,600;0,700;0,800;1,400&family=Inter:ital,opsz,wght@0,14..32,300..900;1,14..32,300..900&family=JetBrains+Mono:ital,wght@0,300;0,400;0,500;0,600;0,700;1,300;1,400&display=swap');
 @import "tailwindcss";
 
 @theme {
-  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
-  --font-display: "Space Grotesk", sans-serif;
-  
-  --shadow-soft: 0 2px 10px rgba(0, 0, 0, 0.05);
+  /* Font families */
+  --font-brand:   "Outfit", ui-sans-serif, system-ui, sans-serif;
+  --font-display: "Plus Jakarta Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-sans:    "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-mono:    "JetBrains Mono", ui-monospace, "Cascadia Code", monospace;
+
+  --shadow-soft:   0 2px 10px rgba(0, 0, 0, 0.05);
   --shadow-medium: 0 4px 20px rgba(0, 0, 0, 0.08);
 }
 
 @layer base {
   body {
     @apply bg-[#F9FAFB] text-slate-900 antialiased selection:bg-emerald-100 selection:text-emerald-900;
+    font-family: "Inter", ui-sans-serif, system-ui, sans-serif;
     /* Prevent horizontal overflow on mobile */
     overflow-x: hidden;
     -webkit-text-size-adjust: 100%;
+    /* Enable font feature settings for better number rendering */
+    font-feature-settings: "kern" 1, "liga" 1, "calt" 1;
   }
 
   * {
@@ -30,6 +43,26 @@
   /* Smooth scroll */
   html {
     scroll-behavior: smooth;
+  }
+
+  /* ── Font Utility Classes ─────────────────────────────────────────────────── */
+  /* font-brand   → Outfit  (DairyFlow logo / brand moments)                   */
+  .font-brand {
+    font-family: "Outfit", ui-sans-serif, system-ui, sans-serif;
+    font-feature-settings: "kern" 1, "liga" 1;
+  }
+
+  /* font-display → Plus Jakarta Sans  (headings / page titles)                */
+  .font-display {
+    font-family: "Plus Jakarta Sans", ui-sans-serif, system-ui, sans-serif;
+    font-feature-settings: "kern" 1, "liga" 1;
+  }
+
+  /* font-mono    → JetBrains Mono  (₹ amounts, litres, IDs, stats)            */
+  .font-mono {
+    font-family: "JetBrains Mono", ui-monospace, "Cascadia Code", monospace;
+    font-feature-settings: "kern" 0, "tnum" 1, "ss01" 1;
+    letter-spacing: -0.02em;
   }
 }
 

@@ -366,8 +366,8 @@ export default function App() {
                 exit={{ opacity: 0, x: -10 }}
                 className="overflow-hidden"
               >
-                <span className="font-display font-bold text-2xl tracking-tighter text-slate-900 block leading-tight">DairyFlow</span>
-                <span className="text-[10px] text-emerald-600 font-black uppercase tracking-[0.2em] block leading-none">Management</span>
+                <span className="font-brand font-bold text-2xl tracking-tight text-slate-900 block leading-tight">DairyFlow</span>
+                <span className="font-display text-[10px] text-emerald-600 font-semibold uppercase tracking-[0.2em] block leading-none">Management</span>
               </motion.div>
             )}
           </AnimatePresence>
