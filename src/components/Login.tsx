@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Lock, User, LogIn, AlertCircle, Phone, Smartphone, ArrowRight, KeyRound } from 'lucide-react';
+import { Lock, User, LogIn, AlertCircle, Phone, Smartphone, ArrowRight, KeyRound, Eye, EyeOff } from 'lucide-react';
 import { motion } from 'motion/react';
 import { useTranslation } from '../i18n';
 
@@ -11,19 +11,21 @@ export default function Login({ onLogin }: LoginProps) {
   const { t } = useTranslation();
   const [loginType, setLoginType] = useState<'customer' | 'admin'>('customer');
   const [isForgotPassword, setIsForgotPassword] = useState(false);
-  
-  // Login credentials (used for both customer and admin)
+
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
-  
-  // Forgot Password / Reset Password states
+  const [showPassword, setShowPassword] = useState(false);
+
   const [phone, setPhone] = useState('');
   const [otp, setOtp] = useState('');
   const [newPassword, setNewPassword] = useState('');
+  const [showNewPassword, setShowNewPassword] = useState(false);
   const [isOtpSent, setIsOtpSent] = useState(false);
 
-  // Mount-time guard: prevent OTP/forgot UI from showing due to any stale in-memory state.
-  // OTP can only appear after the user explicitly clicks “Forgot Password?”.
+  const [error, setError] = useState('');
+  const [message, setMessage] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
+
   React.useEffect(() => {
     setIsForgotPassword(false);
     setIsOtpSent(false);
@@ -32,28 +34,23 @@ export default function Login({ onLogin }: LoginProps) {
     setNewPassword('');
     setError('');
     setMessage('');
+    setShowPassword(false);
+    setShowNewPassword(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
-  const [error, setError] = useState('');
-  const [message, setMessage] = useState('');
-  const [isLoading, setIsLoading] = useState(false);
 
   const handleLoginSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsLoading(true);
     setError('');
     setMessage('');
-
     try {
       const response = await fetch('/api/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ username, password }),
       });
-
       const data = await response.json();
-
       if (response.ok && data.success) {
         onLogin(data.token, data.role, data.customerId, data.customerName, data.defaultRate, data.customerPhone, data.customerAddress, data.customerGender);
       } else {
@@ -63,7 +60,7 @@ export default function Login({ onLogin }: LoginProps) {
         }
         setError(msg);
       }
-    } catch (err) {
+    } catch {
       setError('Something went wrong. Please check your connection.');
     } finally {
       setIsLoading(false);
@@ -75,23 +72,20 @@ export default function Login({ onLogin }: LoginProps) {
     setIsLoading(true);
     setError('');
     setMessage('');
-
     try {
       const response = await fetch('/api/request-otp', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ phone }),
       });
-
       const data = await response.json();
-
       if (response.ok && data.success) {
         setIsOtpSent(true);
-        setMessage('OTP has been sent to your phone number! Check the server console for the OTP.');
+        setMessage(data.message || 'OTP sent to your registered mobile number!');
       } else {
         setError(data.message || 'Failed to send OTP. Please make sure the number is registered.');
       }
-    } catch (err) {
+    } catch {
       setError('Something went wrong. Please check your connection.');
     } finally {
       setIsLoading(false);
@@ -103,16 +97,13 @@ export default function Login({ onLogin }: LoginProps) {
     setIsLoading(true);
     setError('');
     setMessage('');
-
     try {
       const response = await fetch('/api/reset-password', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ phone, otp, newPassword }),
       });
-
       const data = await response.json();
-
       if (response.ok && data.success) {
         setMessage('Password reset successfully! You can now log in with your new password.');
         setIsForgotPassword(false);
@@ -125,7 +116,7 @@ export default function Login({ onLogin }: LoginProps) {
       } else {
         setError(data.message || 'Failed to reset password.');
       }
-    } catch (err) {
+    } catch {
       setError('Something went wrong. Please check your connection.');
     } finally {
       setIsLoading(false);
@@ -134,12 +125,13 @@ export default function Login({ onLogin }: LoginProps) {
 
   return (
     <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
-      <motion.div 
+      <motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
         className="w-full max-w-md bg-white rounded-3xl shadow-xl border border-slate-100 overflow-hidden"
       >
-          <div className="p-8 bg-emerald-600 text-white text-center">
+        {/* Header */}
+        <div className="p-8 bg-emerald-600 text-white text-center">
           <div className="w-20 h-20 bg-white rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-lg overflow-hidden border-2 border-emerald-500/20">
             <img src="/logo.jpg" alt="DairyFlow Logo" className="w-full h-full object-cover" />
           </div>
@@ -149,16 +141,17 @@ export default function Login({ onLogin }: LoginProps) {
           </p>
         </div>
 
+        {/* Tab switcher */}
         {!isForgotPassword && (
           <div className="flex border-b border-slate-100">
             <button
-              onClick={() => { setLoginType('customer'); setUsername(''); setPassword(''); setError(''); setMessage(''); }}
+              onClick={() => { setLoginType('customer'); setUsername(''); setPassword(''); setError(''); setMessage(''); setShowPassword(false); }}
               className={`flex-1 py-4 text-sm font-medium transition-colors ${loginType === 'customer' ? 'text-emerald-600 border-b-2 border-emerald-600 bg-emerald-50/50' : 'text-slate-500 hover:text-slate-700 hover:bg-slate-50'}`}
             >
               {t('customerLogin')}
             </button>
             <button
-              onClick={() => { setLoginType('admin'); setUsername(''); setPassword(''); setError(''); setMessage(''); }}
+              onClick={() => { setLoginType('admin'); setUsername(''); setPassword(''); setError(''); setMessage(''); setShowPassword(false); }}
               className={`flex-1 py-4 text-sm font-medium transition-colors ${loginType === 'admin' ? 'text-emerald-600 border-b-2 border-emerald-600 bg-emerald-50/50' : 'text-slate-500 hover:text-slate-700 hover:bg-slate-50'}`}
             >
               {t('adminLogin')}
@@ -167,8 +160,9 @@ export default function Login({ onLogin }: LoginProps) {
         )}
 
         <div className="p-8">
+          {/* Error */}
           {error && (
-            <motion.div 
+            <motion.div
               initial={{ opacity: 0, x: -10 }}
               animate={{ opacity: 1, x: 0 }}
               className="bg-red-50 text-red-600 p-4 rounded-xl flex items-center gap-3 text-sm border border-red-100 mb-6"
@@ -178,8 +172,9 @@ export default function Login({ onLogin }: LoginProps) {
             </motion.div>
           )}
 
+          {/* Success */}
           {message && (
-            <motion.div 
+            <motion.div
               initial={{ opacity: 0, x: -10 }}
               animate={{ opacity: 1, x: 0 }}
               className="bg-emerald-50 text-emerald-700 p-4 rounded-xl flex items-center gap-3 text-sm border border-emerald-100 mb-6"
@@ -189,49 +184,48 @@ export default function Login({ onLogin }: LoginProps) {
             </motion.div>
           )}
 
+          {/* ── FORGOT PASSWORD FLOW ── */}
           {isForgotPassword ? (
             <div className="space-y-6">
-                      <h3 className="text-lg font-bold text-slate-800 flex items-center gap-2">
-                        <KeyRound size={20} className="text-emerald-600" />
-                        {t('forgotPassword')}
-                      </h3>
+              <h3 className="text-lg font-bold text-slate-800 flex items-center gap-2">
+                <KeyRound size={20} className="text-emerald-600" />
+                {t('forgotPassword')}
+              </h3>
 
               {!isOtpSent ? (
+                /* Step 1 — Enter phone */
                 <form onSubmit={handleRequestOtp} className="space-y-6">
                   <div>
-                      <label className="block text-sm font-medium text-slate-700 mb-1 flex items-center gap-2">
-                      <Phone size={16} /> {t('username')}
+                    <label className="block text-sm font-medium text-slate-700 mb-1 flex items-center gap-2">
+                      <Phone size={16} /> Registered Phone Number
                     </label>
                     <input
                       required
                       type="tel"
                       value={phone}
                       onChange={(e) => setPhone(e.target.value)}
-                      placeholder="Enter registered phone number"
+                      placeholder="Enter 10-digit mobile number"
                       className="w-full p-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 outline-none transition-all"
                     />
                   </div>
-                  
-                      <button
-                        type="submit"
-                        disabled={isLoading || !phone}
-                        className="w-full bg-emerald-600 text-white py-4 rounded-xl font-bold hover:bg-emerald-700 transition-all shadow-lg shadow-emerald-600/20 flex items-center justify-center gap-2 disabled:opacity-70"
-                      >
-                        {isLoading ? (
-                          <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                        ) : (
-                          <>
-                            {t('getOtp')}
-                            <ArrowRight size={20} />
-                          </>
-                        )}
-                      </button>
+                  <button
+                    type="submit"
+                    disabled={isLoading || !phone}
+                    className="w-full bg-emerald-600 text-white py-4 rounded-xl font-bold hover:bg-emerald-700 transition-all shadow-lg shadow-emerald-600/20 flex items-center justify-center gap-2 disabled:opacity-70"
+                  >
+                    {isLoading ? (
+                      <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                    ) : (
+                      <>{t('getOtp')} <ArrowRight size={20} /></>
+                    )}
+                  </button>
                 </form>
               ) : (
-                <form onSubmit={handleResetPassword} className="space-y-6">
+                /* Step 2 — Enter OTP + new password */
+                <form onSubmit={handleResetPassword} className="space-y-5">
                   <div>
                     <label className="block text-sm font-medium text-slate-700 mb-1 flex items-center gap-2">
-                      <Lock size={16} /> {t('resetPassword')}
+                      <KeyRound size={16} /> Enter OTP
                     </label>
                     <input
                       required
@@ -248,16 +242,26 @@ export default function Login({ onLogin }: LoginProps) {
                     <label className="block text-sm font-medium text-slate-700 mb-1 flex items-center gap-2">
                       <Lock size={16} /> New Password
                     </label>
-                    <input
-                      required
-                      type="password"
-                      value={newPassword}
-                      onChange={(e) => setNewPassword(e.target.value)}
-                      placeholder="Enter new password"
-                      className="w-full p-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 outline-none transition-all"
-                    />
+                    <div className="relative">
+                      <input
+                        required
+                        type={showNewPassword ? 'text' : 'password'}
+                        value={newPassword}
+                        onChange={(e) => setNewPassword(e.target.value)}
+                        placeholder="Enter new password"
+                        className="w-full p-3 pr-12 rounded-xl border border-slate-200 focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 outline-none transition-all"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowNewPassword(!showNewPassword)}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-emerald-600 transition-colors p-1"
+                        tabIndex={-1}
+                      >
+                        {showNewPassword ? <EyeOff size={20} /> : <Eye size={20} />}
+                      </button>
+                    </div>
                   </div>
-                  
+
                   <button
                     type="submit"
                     disabled={isLoading || otp.length < 4 || !newPassword}
@@ -266,16 +270,13 @@ export default function Login({ onLogin }: LoginProps) {
                     {isLoading ? (
                       <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
                     ) : (
-                        <>
-                        <KeyRound size={20} />
-                        {t('resetPassword')}
-                      </>
+                      <><KeyRound size={20} /> {t('resetPassword')}</>
                     )}
                   </button>
                 </form>
               )}
 
-              <div className="text-center mt-4">
+              <div className="text-center">
                 <button
                   onClick={() => { setIsForgotPassword(false); setIsOtpSent(false); setPhone(''); setOtp(''); setNewPassword(''); setError(''); setMessage(''); }}
                   className="text-sm text-slate-500 hover:text-emerald-600 font-medium transition-colors"
@@ -285,8 +286,10 @@ export default function Login({ onLogin }: LoginProps) {
               </div>
             </div>
           ) : (
+            /* ── LOGIN FORM ── */
             <form onSubmit={handleLoginSubmit} className="space-y-6">
               <div className="space-y-4">
+                {/* Username */}
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-1 flex items-center gap-2">
                     <User size={16} /> {t('username')}
@@ -301,12 +304,13 @@ export default function Login({ onLogin }: LoginProps) {
                   />
                 </div>
 
+                {/* Password with eye toggle */}
                 <div>
                   <div className="flex justify-between items-center mb-1">
-                      <label className="block text-sm font-medium text-slate-700 flex items-center gap-2">
+                    <label className="block text-sm font-medium text-slate-700 flex items-center gap-2">
                       <Lock size={16} /> {t('password')}
                     </label>
-                      {loginType === 'customer' && (
+                    {loginType === 'customer' && (
                       <button
                         type="button"
                         onClick={() => { setIsForgotPassword(true); setError(''); setMessage(''); }}
@@ -316,14 +320,24 @@ export default function Login({ onLogin }: LoginProps) {
                       </button>
                     )}
                   </div>
-                  <input
-                    required
-                    type="password"
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    placeholder="••••••••"
-                    className="w-full p-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 outline-none transition-all"
-                  />
+                  <div className="relative">
+                    <input
+                      required
+                      type={showPassword ? 'text' : 'password'}
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      placeholder="••••••••"
+                      className="w-full p-3 pr-12 rounded-xl border border-slate-200 focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 outline-none transition-all"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword(!showPassword)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-emerald-600 transition-colors p-1"
+                      tabIndex={-1}
+                    >
+                      {showPassword ? <EyeOff size={20} /> : <Eye size={20} />}
+                    </button>
+                  </div>
                 </div>
               </div>
 
@@ -332,13 +346,10 @@ export default function Login({ onLogin }: LoginProps) {
                 disabled={isLoading}
                 className="w-full bg-emerald-600 text-white py-4 rounded-xl font-bold hover:bg-emerald-700 transition-all shadow-lg shadow-emerald-600/20 flex items-center justify-center gap-2 disabled:opacity-70"
               >
-                    {isLoading ? (
+                {isLoading ? (
                   <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
                 ) : (
-                  <>
-                        <LogIn size={20} />
-                        {loginType === 'admin' ? t('signInAsAdmin') : t('signInAsCustomer')}
-                  </>
+                  <><LogIn size={20} /> {loginType === 'admin' ? t('signInAsAdmin') : t('signInAsCustomer')}</>
                 )}
               </button>
             </form>

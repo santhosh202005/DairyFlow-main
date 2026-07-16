@@ -14,7 +14,7 @@ createRoot(document.getElementById('root')!).render(
 
 // ── Register Service Worker (PWA) ─────────────────────────────────────────────
 // Cache-busting: bump SW_VERSION on every deploy so stale old bundles don't stick.
-const SW_VERSION = 'v2';
+const SW_VERSION = 'v4';
 
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', async () => {

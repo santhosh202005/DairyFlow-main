@@ -32,7 +32,7 @@ export default function Settings({ authData, onLogout }: SettingsProps) {
 
   const tabs = [
     { id: 'profile' as TabType, label: t('profileInfo'), icon: User },
-    { id: 'reports' as TabType, label: authData.role === 'admin' ? t('reports') : 'My Reports', icon: FileText },
+    { id: 'reports' as TabType, label: authData.role === 'admin' ? t('reports') : t('myReports'), icon: FileText },
     { id: 'about' as TabType, label: t('about'), icon: Info },
     { id: 'logout' as TabType, label: t('signOut'), icon: LogOut, className: 'text-rose-500 hover:bg-rose-50' },
   ];

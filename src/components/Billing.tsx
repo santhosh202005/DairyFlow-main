@@ -4,12 +4,14 @@ import { BillingRecord } from '../types';
 import { motion } from 'motion/react';
 import SearchBar from './SearchBar';
 import { useDebouncedValue } from '../hooks/useDebouncedValue';
+import { useTranslation } from '../i18n';
 
 interface BillingProps {
   customerId?: string;
 }
 
 export default function Billing({ customerId }: BillingProps) {
+  const { t } = useTranslation();
   const [billingData, setBillingData] = useState<BillingRecord[]>([]);
   const [detailedData, setDetailedData] = useState<{
     customer?: any;
@@ -53,7 +55,7 @@ export default function Billing({ customerId }: BillingProps) {
       .then(async (res) => {
         if (!res.ok) {
           const payload = await res.json().catch(() => ({}));
-          throw new Error(payload?.message || 'Unable to fetch report');
+          throw new Error(payload?.message || t('unableToLoadReport'));
         }
         return res.json();
       })
@@ -77,7 +79,7 @@ export default function Billing({ customerId }: BillingProps) {
       return (
         <div className="space-y-4 md:space-y-10 pb-4 md:pb-20">
           <div className="bg-white rounded-2xl border border-rose-100 p-8 text-center shadow-soft">
-            <p className="text-xl font-display font-bold text-rose-600">Unable to load report</p>
+            <p className="text-xl font-display font-bold text-rose-600">{t('unableToLoadReport')}</p>
             <p className="text-sm text-slate-500 mt-2">{detailError}</p>
             <button
               onClick={() => {
@@ -86,7 +88,7 @@ export default function Billing({ customerId }: BillingProps) {
               }}
               className="mt-6 inline-flex items-center justify-center px-5 py-3 rounded-xl bg-emerald-600 text-white font-bold text-sm hover:bg-emerald-700 transition-colors touch-btn"
             >
-              Retry
+              {t('retry')}
             </button>
           </div>
         </div>
@@ -97,7 +99,7 @@ export default function Billing({ customerId }: BillingProps) {
       return (
         <div className="space-y-4 md:space-y-10 pb-4 md:pb-20">
           <div className="bg-white rounded-2xl border border-slate-100 p-8 text-center shadow-soft">
-            <p className="text-lg font-display font-bold text-slate-900">Loading customer report…</p>
+            <p className="text-lg font-display font-bold text-slate-900">{t('loadingReport')}</p>
           </div>
         </div>
       );
@@ -135,7 +137,7 @@ export default function Billing({ customerId }: BillingProps) {
             <div>
               <div className="flex items-center gap-2 mb-1">
                 <span className="px-2 py-0.5 bg-emerald-100 text-emerald-700 text-[10px] font-black rounded-full uppercase tracking-[0.15em]">
-                  Consolidated Statement
+                  {t('consolidatedStatement')}
                 </span>
                 <div className="flex items-center gap-1 text-slate-400 text-[10px] font-black uppercase tracking-widest">
                   <Calendar size={10} />
@@ -143,7 +145,7 @@ export default function Billing({ customerId }: BillingProps) {
                 </div>
               </div>
               <h2 className="page-title">
-                {customerId ? 'Personal' : (billingData.find(b => b.customer_id === viewingDetails)?.name || 'Farmer')} <span className="text-emerald-600">Balance</span>
+                {customerId ? t('personal') : (billingData.find(b => b.customer_id === viewingDetails)?.name || t('farmer'))} <span className="text-emerald-600">{t('balance')}</span>
               </h2>
             </div>
           </div>
@@ -171,7 +173,7 @@ export default function Billing({ customerId }: BillingProps) {
                 <Droplets size={14} className="md:hidden" />
                 <Droplets size={20} className="hidden md:block" />
               </div>
-              <span className="text-[9px] md:text-[10px] font-black uppercase tracking-widest leading-tight text-emerald-700">Milk<br/>Earnings</span>
+              <span className="text-[9px] md:text-[10px] font-black uppercase tracking-widest leading-tight text-emerald-700">{t('milkEarnings')}</span>
             </div>
             <p className="text-lg md:text-3xl font-display font-bold text-emerald-900 tracking-tight">₹{totalMilkAmount.toFixed(0)}</p>
           </div>
@@ -182,11 +184,11 @@ export default function Billing({ customerId }: BillingProps) {
                 <Wallet size={14} className="md:hidden" />
                 <Wallet size={20} className="hidden md:block" />
               </div>
-              <span className="text-[9px] md:text-[10px] font-black uppercase tracking-widest leading-tight text-slate-500">Cash<br/>Advances</span>
+              <span className="text-[9px] md:text-[10px] font-black uppercase tracking-widest leading-tight text-slate-500">{t('cashAdvances')}</span>
             </div>
             <div>
               <p className="text-lg md:text-3xl font-display font-bold text-blue-600 tracking-tight">₹{totalCashAdvances.toFixed(0)}</p>
-              <p className="text-[8px] text-blue-400 mt-1 uppercase font-black tracking-widest hidden md:block">Informational</p>
+              <p className="text-[8px] text-blue-400 mt-1 uppercase font-black tracking-widest hidden md:block">{t('informational')}</p>
             </div>
           </div>
 
@@ -196,11 +198,11 @@ export default function Billing({ customerId }: BillingProps) {
                 <Wallet size={14} className="md:hidden" />
                 <Wallet size={20} className="hidden md:block" />
               </div>
-              <span className="text-[9px] md:text-[10px] font-black uppercase tracking-widest leading-tight text-slate-500">Bill<br/>Reduction</span>
+              <span className="text-[9px] md:text-[10px] font-black uppercase tracking-widest leading-tight text-slate-500">{t('billReduction')}</span>
             </div>
             <div>
               <p className="text-lg md:text-3xl font-display font-bold text-rose-600 tracking-tight">₹{cattleFeedReduction.toFixed(0)}</p>
-              <p className="text-[8px] text-rose-400 mt-1 uppercase font-black tracking-widest hidden md:block">Subtracted</p>
+              <p className="text-[8px] text-rose-400 mt-1 uppercase font-black tracking-widest hidden md:block">{t('subtracted')}</p>
             </div>
           </div>
 
@@ -210,11 +212,11 @@ export default function Billing({ customerId }: BillingProps) {
                 <Package size={14} className="md:hidden" />
                 <Package size={20} className="hidden md:block" />
               </div>
-              <span className="text-[9px] md:text-[10px] font-black uppercase tracking-widest leading-tight text-slate-500">Feed<br/>Expenses</span>
+              <span className="text-[9px] md:text-[10px] font-black uppercase tracking-widest leading-tight text-slate-500">{t('feedExpenses')}</span>
             </div>
             <div>
               <p className="text-lg md:text-3xl font-display font-bold text-orange-600 tracking-tight">₹{totalFeedAmount.toFixed(0)}</p>
-              <p className="text-[8px] text-orange-400 mt-1 uppercase font-black tracking-widest hidden md:block">Info Only</p>
+              <p className="text-[8px] text-orange-400 mt-1 uppercase font-black tracking-widest hidden md:block">{t('infoOnly')}</p>
             </div>
           </div>
 
@@ -224,7 +226,7 @@ export default function Billing({ customerId }: BillingProps) {
                 <Package size={14} className="md:hidden" />
                 <Package size={20} className="hidden md:block" />
               </div>
-              <span className="text-[9px] md:text-[10px] font-black uppercase tracking-widest leading-tight text-rose-700">Total<br/>Debt</span>
+              <span className="text-[9px] md:text-[10px] font-black uppercase tracking-widest leading-tight text-rose-700">{t('totalDebt')}</span>
             </div>
             <p className="text-lg md:text-3xl font-display font-bold text-rose-600 tracking-tight">₹{((detailedData as any).advanceBalance || 0).toFixed(0)}</p>
           </div>
@@ -235,7 +237,7 @@ export default function Billing({ customerId }: BillingProps) {
                 <FileText size={14} className="md:hidden" />
                 <FileText size={20} className="hidden md:block" />
               </div>
-              <span className="text-[9px] md:text-[10px] font-black uppercase tracking-widest leading-tight text-slate-300">Net<br/>Payout</span>
+              <span className="text-[9px] md:text-[10px] font-black uppercase tracking-widest leading-tight text-slate-300">{t('netPayout')}</span>
             </div>
             <p className="text-xl md:text-4xl font-display font-bold tracking-tight text-emerald-400">₹{finalPayable.toFixed(0)}</p>
           </div>
@@ -247,13 +249,13 @@ export default function Billing({ customerId }: BillingProps) {
           <div className="relative z-10">
             <div className="mb-5 md:mb-10 flex flex-col md:flex-row md:justify-between md:items-start gap-2">
               <div>
-                <h3 className="section-heading mb-1">Monthly Statement</h3>
+                <h3 className="section-heading mb-1">{t('monthlyStatement')}</h3>
                 <p className="text-xs md:text-sm text-slate-400 font-medium">
                   {new Date(selectedMonth + '-01').toLocaleDateString('default', { month: 'long', year: 'numeric' })}
                 </p>
               </div>
               <div className="text-left md:text-right">
-                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-0.5">Statement Date</p>
+                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-0.5">{t('statementDate')}</p>
                 <p className="text-xs font-bold text-slate-900">{new Date().toLocaleDateString()}</p>
               </div>
             </div>
@@ -264,37 +266,37 @@ export default function Billing({ customerId }: BillingProps) {
                   <table className="w-full text-left">
                     <thead>
                       <tr className="border-b border-slate-200">
-                        <th className="pb-3 text-[10px] font-black text-slate-400 uppercase tracking-widest">Category</th>
-                        <th className="pb-3 text-[10px] font-black text-slate-400 uppercase tracking-widest text-right">Amount</th>
+                        <th className="pb-3 text-[10px] font-black text-slate-400 uppercase tracking-widest">{t('category')}</th>
+                        <th className="pb-3 text-[10px] font-black text-slate-400 uppercase tracking-widest text-right">{t('amount')}</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
                       <tr>
-                        <td className="py-3 text-xs md:text-sm font-bold text-slate-700">Total Milk Earnings</td>
+                        <td className="py-3 text-xs md:text-sm font-bold text-slate-700">{t('milkEarnings')}</td>
                         <td className="py-3 text-xs md:text-sm font-black text-emerald-600 text-right">+ ₹{totalMilkAmount.toFixed(2)}</td>
                       </tr>
                       <tr>
-                        <td className="py-3 text-xs md:text-sm font-bold text-slate-700">Advances Deduction</td>
+                        <td className="py-3 text-xs md:text-sm font-bold text-slate-700">{t('advancesDeduction')}</td>
                         <td className="py-3 text-xs md:text-sm font-black text-rose-500 text-right">- ₹{totalBillDeductions.toFixed(2)}</td>
                       </tr>
                       <tr>
-                        <td className="py-3 text-xs md:text-sm font-bold text-slate-700">Total Cattle Feed</td>
+                        <td className="py-3 text-xs md:text-sm font-bold text-slate-700">{t('totalCattleFeed')}</td>
                         <td className="py-3 text-xs md:text-sm font-bold text-slate-500 text-right">₹{totalFeedAmount.toFixed(2)}</td>
                       </tr>
                       <tr>
-                        <td className="py-3 text-xs md:text-sm font-bold text-slate-700">Cattle Feed Reduction</td>
+                        <td className="py-3 text-xs md:text-sm font-bold text-slate-700">{t('cattleFeedReduction')}</td>
                         <td className="py-3 text-xs md:text-sm font-black text-rose-500 text-right">- ₹{cattleFeedReduction.toFixed(2)}</td>
                       </tr>
                       <tr>
-                        <td className="py-3 text-xs md:text-sm font-bold text-slate-700">Net Cattle Feed</td>
+                        <td className="py-3 text-xs md:text-sm font-bold text-slate-700">{t('netCattleFeed')}</td>
                         <td className="py-3 text-xs md:text-sm font-bold text-emerald-600 text-right">₹{netCattleFeed.toFixed(2)}</td>
                       </tr>
                       <tr>
-                        <td className="py-3 text-xs md:text-sm font-bold text-slate-700">Remaining Balance</td>
+                        <td className="py-3 text-xs md:text-sm font-bold text-slate-700">{t('remainingBalance')}</td>
                         <td className="py-3 text-xs md:text-sm font-bold text-orange-600 text-right">₹{remainingBalance.toFixed(2)}</td>
                       </tr>
                       <tr className="bg-white/50">
-                        <td className="py-4 text-sm md:text-base font-black text-slate-900">Final Net Settlement</td>
+                        <td className="py-4 text-sm md:text-base font-black text-slate-900">{t('finalNetSettlement')}</td>
                         <td className="py-4 text-xl md:text-2xl font-display font-bold text-slate-900 text-right">₹{finalPayable.toFixed(2)}</td>
                       </tr>
                     </tbody>
@@ -303,14 +305,14 @@ export default function Billing({ customerId }: BillingProps) {
                 
                 <div className="mt-4 md:mt-8 grid grid-cols-2 gap-3 md:gap-4">
                   <div className="p-3 md:p-6 rounded-xl md:rounded-2xl bg-blue-50/50 border border-blue-100">
-                    <p className="text-[9px] md:text-[10px] font-black text-blue-400 uppercase tracking-widest mb-0.5 md:mb-1">Cash Advances</p>
+                    <p className="text-[9px] md:text-[10px] font-black text-blue-400 uppercase tracking-widest mb-0.5 md:mb-1">{t('cashAdvances')}</p>
                     <p className="text-base md:text-xl font-display font-bold text-blue-600">₹{totalCashAdvances.toFixed(0)}</p>
-                    <p className="text-[8px] text-blue-400 font-bold mt-1 uppercase italic hidden md:block">(Not deducted)</p>
+                    <p className="text-[8px] text-blue-400 font-bold mt-1 uppercase italic hidden md:block">{t('notDeducted')}</p>
                   </div>
                   <div className="p-3 md:p-6 rounded-xl md:rounded-2xl bg-rose-50/50 border border-rose-100">
-                    <p className="text-[9px] md:text-[10px] font-black text-rose-400 uppercase tracking-widest mb-0.5 md:mb-1">Remaining Debt</p>
+                    <p className="text-[9px] md:text-[10px] font-black text-rose-400 uppercase tracking-widest mb-0.5 md:mb-1">{t('remainingDebt')}</p>
                     <p className="text-base md:text-xl font-display font-bold text-rose-600">₹{((detailedData as any).advanceBalance || 0).toFixed(0)}</p>
-                    <p className="text-[8px] text-rose-400 font-bold mt-1 uppercase italic hidden md:block">(Carry forward)</p>
+                    <p className="text-[8px] text-rose-400 font-bold mt-1 uppercase italic hidden md:block">{t('carryForward')}</p>
                   </div>
                 </div>
               </div>
@@ -318,18 +320,18 @@ export default function Billing({ customerId }: BillingProps) {
               <div className="lg:w-1/3 w-full">
                 <div className="bg-slate-900 p-5 md:p-8 rounded-2xl md:rounded-[2rem] text-white shadow-2xl h-full flex flex-col justify-between">
                   <div>
-                    <h4 className="text-[10px] font-black text-emerald-400 uppercase tracking-[0.2em] mb-4 md:mb-6">Farmer Record</h4>
+                    <h4 className="text-[10px] font-black text-emerald-400 uppercase tracking-[0.2em] mb-4 md:mb-6">{t('farmerRecord')}</h4>
                     <div className="space-y-3 md:space-y-4">
                       <div className="flex justify-between">
-                        <span className="text-xs md:text-sm font-bold text-slate-400">Farmer ID</span>
+                        <span className="text-xs md:text-sm font-bold text-slate-400">{t('farmerId')}</span>
                         <span className="text-xs md:text-sm font-black text-white">#F-{viewingDetails}</span>
                       </div>
                       <div className="flex justify-between">
-                        <span className="text-xs md:text-sm font-bold text-slate-400">Base Rate</span>
+                        <span className="text-xs md:text-sm font-bold text-slate-400">{t('baseRate')}</span>
                         <span className="text-xs md:text-sm font-black text-white">₹{((detailedData as any).customer?.default_rate || 30).toFixed(2)}/L</span>
                       </div>
                       <div className="flex justify-between">
-                        <span className="text-xs md:text-sm font-bold text-slate-400">Total Supply</span>
+                        <span className="text-xs md:text-sm font-bold text-slate-400">{t('totalSupply')}</span>
                         <span className="text-xs md:text-sm font-black text-white">{detailedData.milkEntries.reduce((acc, curr) => acc + curr.liters, 0).toFixed(1)} L</span>
                       </div>
                     </div>
@@ -339,7 +341,7 @@ export default function Billing({ customerId }: BillingProps) {
                       onClick={() => window.print()}
                       className="w-full py-2.5 md:py-3 bg-white/10 hover:bg-white/20 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all touch-btn"
                     >
-                      Print Statement
+                      {t('printStatement')}
                     </button>
                   </div>
                 </div>
@@ -355,7 +357,7 @@ export default function Billing({ customerId }: BillingProps) {
             <div className="px-4 md:px-8 py-4 md:py-6 bg-slate-50/50 border-b border-slate-50 flex items-center justify-between">
               <h4 className="text-xs md:text-sm font-black text-slate-800 uppercase tracking-widest flex items-center gap-2">
                 <Droplets size={13} className="text-emerald-500" />
-                Milk Supply Details
+                {t('milkSupplyDetails')}
               </h4>
               <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">{detailedData.milkEntries.length} Records</span>
             </div>
@@ -363,11 +365,11 @@ export default function Billing({ customerId }: BillingProps) {
               <table className="w-full text-left mobile-compact-table">
                 <thead className="bg-white/90 backdrop-blur sticky top-0 z-10">
                   <tr className="border-b border-slate-50">
-                    <th className="px-4 md:px-8 py-3 md:py-4 font-black text-slate-500 text-[10px] uppercase tracking-widest">Date</th>
-                    <th className="px-4 md:px-8 py-3 md:py-4 font-black text-slate-500 text-[10px] uppercase tracking-widest">Shift</th>
-                    <th className="px-4 md:px-8 py-3 md:py-4 font-black text-slate-500 text-[10px] uppercase tracking-widest">Liters</th>
-                    <th className="hidden sm:table-cell px-4 md:px-8 py-3 md:py-4 font-black text-slate-500 text-[10px] uppercase tracking-widest">Rate</th>
-                    <th className="px-4 md:px-8 py-3 md:py-4 font-black text-slate-500 text-[10px] uppercase tracking-widest text-right">Value</th>
+                    <th className="px-4 md:px-8 py-3 md:py-4 font-black text-slate-500 text-[10px] uppercase tracking-widest">{t('date')}</th>
+                    <th className="px-4 md:px-8 py-3 md:py-4 font-black text-slate-500 text-[10px] uppercase tracking-widest">{t('shift')}</th>
+                    <th className="px-4 md:px-8 py-3 md:py-4 font-black text-slate-500 text-[10px] uppercase tracking-widest">{t('liters')}</th>
+                    <th className="hidden sm:table-cell px-4 md:px-8 py-3 md:py-4 font-black text-slate-500 text-[10px] uppercase tracking-widest">{t('rate')}</th>
+                    <th className="px-4 md:px-8 py-3 md:py-4 font-black text-slate-500 text-[10px] uppercase tracking-widest text-right">{t('value')}</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-50/50">
@@ -397,7 +399,7 @@ export default function Billing({ customerId }: BillingProps) {
                     </tr>
                   ))}
                   <tr className="bg-slate-50">
-                    <td colSpan={2} className="px-4 md:px-8 py-3 md:py-4 text-xs md:text-sm font-black text-slate-900 uppercase">Subtotal</td>
+                    <td colSpan={2} className="px-4 md:px-8 py-3 md:py-4 text-xs md:text-sm font-black text-slate-900 uppercase">{t('subtotal')}</td>
                     <td className="px-4 md:px-8 py-3 md:py-4 text-xs md:text-sm font-black text-slate-900">{detailedData.milkEntries.reduce((acc, curr) => acc + curr.liters, 0).toFixed(1)} L</td>
                     <td className="hidden sm:table-cell px-4 md:px-8 py-3 md:py-4"></td>
                     <td className="px-4 md:px-8 py-3 md:py-4 text-right text-base md:text-lg font-display font-black text-emerald-600">₹{totalMilkAmount.toFixed(2)}</td>
@@ -413,7 +415,7 @@ export default function Billing({ customerId }: BillingProps) {
               <div className="px-4 md:px-8 py-4 md:py-6 bg-slate-50/50 border-b border-slate-50 flex items-center justify-between">
                 <h4 className="text-xs md:text-sm font-black text-slate-800 uppercase tracking-widest flex items-center gap-2">
                   <Package size={13} className="text-orange-500" />
-                  Feed Expenses
+                  {t('feedExpenses')}
                 </h4>
                 <span className="text-xs md:text-sm font-black text-rose-500">₹{totalFeedAmount.toFixed(0)}</span>
               </div>
@@ -421,10 +423,10 @@ export default function Billing({ customerId }: BillingProps) {
                 <table className="w-full text-left mobile-compact-table">
                   <thead className="bg-white border-b border-slate-50">
                     <tr>
-                      <th className="px-4 md:px-8 py-2.5 md:py-4 text-[10px] font-black text-slate-500 uppercase tracking-widest">Date</th>
-                      <th className="px-4 md:px-8 py-2.5 md:py-4 text-[10px] font-black text-slate-500 uppercase tracking-widest">Item</th>
-                      <th className="hidden sm:table-cell px-4 md:px-8 py-2.5 md:py-4 text-[10px] font-black text-slate-500 uppercase tracking-widest">Qty</th>
-                      <th className="px-4 md:px-8 py-2.5 md:py-4 text-[10px] font-black text-slate-500 uppercase tracking-widest text-right">Cost</th>
+                      <th className="px-4 md:px-8 py-2.5 md:py-4 text-[10px] font-black text-slate-500 uppercase tracking-widest">{t('date')}</th>
+                      <th className="px-4 md:px-8 py-2.5 md:py-4 text-[10px] font-black text-slate-500 uppercase tracking-widest">{t('item')}</th>
+                      <th className="hidden sm:table-cell px-4 md:px-8 py-2.5 md:py-4 text-[10px] font-black text-slate-500 uppercase tracking-widest">{t('qtyLabel')}</th>
+                      <th className="px-4 md:px-8 py-2.5 md:py-4 text-[10px] font-black text-slate-500 uppercase tracking-widest text-right">{t('cost')}</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-50">
@@ -439,7 +441,7 @@ export default function Billing({ customerId }: BillingProps) {
                       </tr>
                     ))}
                     {detailedData.feedPurchases.length === 0 && (
-                      <tr><td colSpan={4} className="py-6 text-center text-slate-300 italic font-medium text-sm">No feed allocations</td></tr>
+                      <tr><td colSpan={4} className="py-6 text-center text-slate-300 italic font-medium text-sm">{t('noFeedAllocations')}</td></tr>
                     )}
                   </tbody>
                 </table>
@@ -451,17 +453,17 @@ export default function Billing({ customerId }: BillingProps) {
               <div className="px-4 md:px-8 py-4 md:py-6 bg-slate-50/50 border-b border-slate-50 flex items-center justify-between">
                 <h4 className="text-xs md:text-sm font-black text-slate-800 uppercase tracking-widest flex items-center gap-2">
                   <Wallet size={13} className="text-emerald-500" />
-                  Advances Ledger
+                  {t('advancesLedger')}
                 </h4>
-                <span className="text-xs md:text-sm font-black text-emerald-600">Repaid: ₹{totalBillDeductions.toFixed(0)}</span>
+                <span className="text-xs md:text-sm font-black text-emerald-600">{t('repaid')}: ₹{totalBillDeductions.toFixed(0)}</span>
               </div>
               <div className="overflow-x-auto">
                 <table className="w-full text-left mobile-compact-table">
                   <thead className="bg-white border-b border-slate-50">
                     <tr>
-                      <th className="px-4 md:px-8 py-2.5 md:py-4 text-[10px] font-black text-slate-500 uppercase tracking-widest">Date</th>
-                      <th className="px-4 md:px-8 py-2.5 md:py-4 text-[10px] font-black text-slate-500 uppercase tracking-widest">Type</th>
-                      <th className="px-4 md:px-8 py-2.5 md:py-4 text-[10px] font-black text-slate-500 uppercase tracking-widest text-right">Amount</th>
+                      <th className="px-4 md:px-8 py-2.5 md:py-4 text-[10px] font-black text-slate-500 uppercase tracking-widest">{t('date')}</th>
+                      <th className="px-4 md:px-8 py-2.5 md:py-4 text-[10px] font-black text-slate-500 uppercase tracking-widest">{t('type')}</th>
+                      <th className="px-4 md:px-8 py-2.5 md:py-4 text-[10px] font-black text-slate-500 uppercase tracking-widest text-right">{t('amount')}</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-50">
@@ -474,7 +476,7 @@ export default function Billing({ customerId }: BillingProps) {
                           <span className={`px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-widest ${
                             a.type === 'deduction' ? 'bg-emerald-50 text-emerald-700 border border-emerald-100' : 'bg-blue-50 text-blue-700 border border-blue-100'
                           }`}>
-                            {a.type === 'deduction' ? 'Deduction' : 'Advance'}
+                            {a.type === 'deduction' ? t('deductionsLabel') : t('advancesLabel')}
                           </span>
                         </td>
                         <td className={`px-4 md:px-8 py-2.5 md:py-4 text-right text-xs md:text-sm font-display font-black ${
@@ -485,7 +487,7 @@ export default function Billing({ customerId }: BillingProps) {
                       </tr>
                     ))}
                     {detailedData.advances.length === 0 && (
-                      <tr><td colSpan={3} className="py-6 text-center text-slate-300 italic font-medium text-sm">No transactions</td></tr>
+                      <tr><td colSpan={3} className="py-6 text-center text-slate-300 italic font-medium text-sm">{t('noTransactions')}</td></tr>
                     )}
                   </tbody>
                 </table>
@@ -504,7 +506,7 @@ export default function Billing({ customerId }: BillingProps) {
         <div>
           <div className="flex items-center gap-2 mb-1 md:mb-3">
             <span className="px-2 py-0.5 md:px-3 md:py-1 bg-emerald-100 text-emerald-700 text-[10px] font-black rounded-full uppercase tracking-[0.15em]">
-              Financial Overview
+              {t('financialOverview')}
             </span>
             <div className="relative">
               <Calendar className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" size={12} />
@@ -517,7 +519,7 @@ export default function Billing({ customerId }: BillingProps) {
             </div>
           </div>
           <h2 className="page-title">
-            Settlement <span className="text-emerald-600">Journal</span>
+            {t('settlementJournal').split(' ')[0]} <span className="text-emerald-600">{t('settlementJournal').split(' ').slice(1).join(' ')}</span>
           </h2>
         </div>
 
@@ -526,7 +528,7 @@ export default function Billing({ customerId }: BillingProps) {
             <SearchBar
               value={search}
               onChange={setSearch}
-              placeholder="Search farmers by name or ID..."
+              placeholder={t('searchFarmers')}
               className="w-full"
             />
           </div>
@@ -535,7 +537,7 @@ export default function Billing({ customerId }: BillingProps) {
           </button>
           <button className="hidden md:flex items-center gap-2 bg-emerald-600 text-white px-6 py-4 rounded-[1.5rem] font-black text-xs uppercase tracking-widest hover:bg-emerald-700 transition-all shadow-lg shadow-emerald-100 active:scale-95 touch-btn">
             <Download size={18} />
-            Export
+            {t('export')}
           </button>
         </div>
       </div>
@@ -546,13 +548,13 @@ export default function Billing({ customerId }: BillingProps) {
           <table className="w-full text-left border-collapse">
             <thead>
               <tr className="bg-slate-50/50 border-b border-slate-50">
-                <th className="px-6 md:px-10 py-4 md:py-6 font-black text-slate-500 text-[10px] uppercase tracking-[0.2em]">Farmer</th>
-                <th className="px-6 md:px-10 py-4 md:py-6 font-black text-slate-500 text-[10px] uppercase tracking-[0.2em]">Vol (L)</th>
-                <th className="px-6 md:px-10 py-4 md:py-6 font-black text-slate-500 text-[10px] uppercase tracking-[0.2em]">Gross Revenue</th>
-                <th className="px-6 md:px-10 py-4 md:py-6 font-black text-slate-500 text-[10px] uppercase tracking-[0.2em]">Cattle Feed Details</th>
-                <th className="px-6 md:px-10 py-4 md:py-6 font-black text-slate-500 text-[10px] uppercase tracking-[0.2em] text-right">Debt</th>
-                <th className="px-6 md:px-10 py-4 md:py-6 font-black text-slate-500 text-[10px] uppercase tracking-[0.2em] text-right">Net Settlement</th>
-                <th className="px-6 md:px-10 py-4 md:py-6 font-black text-slate-500 text-[10px] uppercase tracking-[0.2em] text-center">View</th>
+                <th className="px-6 md:px-10 py-4 md:py-6 font-black text-slate-500 text-[10px] uppercase tracking-[0.2em]">{t('farmer')}</th>
+                <th className="px-6 md:px-10 py-4 md:py-6 font-black text-slate-500 text-[10px] uppercase tracking-[0.2em]">{t('volL')}</th>
+                <th className="px-6 md:px-10 py-4 md:py-6 font-black text-slate-500 text-[10px] uppercase tracking-[0.2em]">{t('grossRevenue')}</th>
+                <th className="px-6 md:px-10 py-4 md:py-6 font-black text-slate-500 text-[10px] uppercase tracking-[0.2em]">{t('cattleFeedDetails')}</th>
+                <th className="px-6 md:px-10 py-4 md:py-6 font-black text-slate-500 text-[10px] uppercase tracking-[0.2em] text-right">{t('debt')}</th>
+                <th className="px-6 md:px-10 py-4 md:py-6 font-black text-slate-500 text-[10px] uppercase tracking-[0.2em] text-right">{t('netSettlement')}</th>
+                <th className="px-6 md:px-10 py-4 md:py-6 font-black text-slate-500 text-[10px] uppercase tracking-[0.2em] text-center">{t('view')}</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-50">
@@ -595,8 +597,8 @@ export default function Billing({ customerId }: BillingProps) {
                     <div className="w-16 h-16 bg-slate-50 rounded-[2rem] flex items-center justify-center text-slate-200 mx-auto mb-4">
                       <Search size={32} />
                     </div>
-                    <p className="text-base font-display font-bold text-slate-400">No records found</p>
-                    <p className="text-sm text-slate-300 font-medium">No entries for {selectedMonth}.</p>
+                    <p className="text-base font-display font-bold text-slate-400">{t('noRecordsFound')}</p>
+                    <p className="text-sm text-slate-300 font-medium">{t('noEntriesForMonth')}</p>
                   </td>
                 </tr>
               )}
@@ -612,8 +614,8 @@ export default function Billing({ customerId }: BillingProps) {
             <div className="w-12 h-12 bg-slate-50 rounded-xl flex items-center justify-center text-slate-200 mx-auto mb-3">
               <Search size={24} />
             </div>
-            <p className="text-sm font-bold text-slate-400">No Records</p>
-            <p className="text-xs text-slate-300 mt-1">No entries found for {selectedMonth}.</p>
+            <p className="text-sm font-bold text-slate-400">{t('noRecords')}</p>
+            <p className="text-xs text-slate-300 mt-1">{t('noEntriesFoundForMonth')}</p>
           </div>
         )}
         {filteredBilling.map((record: any) => (
@@ -626,13 +628,13 @@ export default function Billing({ customerId }: BillingProps) {
             <div className="flex items-start justify-between gap-2 mb-2.5">
               <div>
                 <p className="font-bold text-slate-900 text-sm">{record.name}</p>
-                <p className="text-[11px] text-slate-400 mt-0.5">{record.total_liters.toFixed(1)} L supplied</p>
+                <p className="text-[11px] text-slate-400 mt-0.5">{record.total_liters.toFixed(1)} {t('lSupplied')}</p>
               </div>
               <button 
                 onClick={() => setViewingDetails(record.customer_id)}
                 className="flex items-center gap-1 px-3 py-1.5 rounded-xl bg-emerald-50 text-emerald-700 text-[11px] font-black uppercase tracking-wide touch-btn"
               >
-                View <ChevronRight size={12} />
+                {t('view')} <ChevronRight size={12} />
               </button>
             </div>
             {/* Show Feed Reduction details in mobile layout */}
@@ -644,17 +646,17 @@ export default function Billing({ customerId }: BillingProps) {
             </div>
             <div className="grid grid-cols-3 gap-2 pt-2.5 border-t border-slate-50">
               <div className="text-center">
-                <p className="text-[9px] text-slate-400 uppercase font-black tracking-wider">Gross</p>
+                <p className="text-[9px] text-slate-400 uppercase font-black tracking-wider">{t('gross')}</p>
                 <p className="text-sm font-display font-bold text-slate-700">₹{record.total_amount.toFixed(0)}</p>
               </div>
               <div className="text-center">
-                <p className="text-[9px] text-slate-400 uppercase font-black tracking-wider">Debt</p>
+                <p className="text-[9px] text-slate-400 uppercase font-black tracking-wider">{t('debt')}</p>
                 <p className={`text-sm font-display font-bold ${record.advance_balance > 0 ? 'text-rose-500' : 'text-slate-300'}`}>
                   ₹{record.advance_balance.toFixed(0)}
                 </p>
               </div>
               <div className="text-center">
-                <p className="text-[9px] text-emerald-500 uppercase font-black tracking-wider">Net Pay</p>
+                <p className="text-[9px] text-emerald-500 uppercase font-black tracking-wider">{t('netPay')}</p>
                 <p className="text-sm font-display font-bold text-emerald-600">₹{record.final_payable.toFixed(0)}</p>
               </div>
             </div>
@@ -665,25 +667,25 @@ export default function Billing({ customerId }: BillingProps) {
       {/* Summary footer cards */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-8">
         <div className="bento-card bg-emerald-50 border-emerald-100">
-          <p className="text-[10px] text-emerald-600 font-black uppercase tracking-[0.2em] mb-1 md:mb-2">Total Liters</p>
+          <p className="text-[10px] text-emerald-600 font-black uppercase tracking-[0.2em] mb-1 md:mb-2">{t('totalLiters')}</p>
           <p className="text-xl md:text-4xl font-display font-bold text-emerald-900 tracking-tight">
             {filteredBilling.reduce((acc: any, curr: any) => acc + curr.total_liters, 0).toFixed(0)} <span className="text-sm md:text-xl">L</span>
           </p>
         </div>
         <div className="bento-card border-slate-100">
-          <p className="text-[10px] text-slate-400 font-black uppercase tracking-[0.2em] mb-1 md:mb-2">Total Debt</p>
+          <p className="text-[10px] text-slate-400 font-black uppercase tracking-[0.2em] mb-1 md:mb-2">{t('totalDebt')}</p>
           <p className="text-xl md:text-4xl font-display font-bold text-rose-500 tracking-tight">
             ₹{filteredBilling.reduce((acc: any, curr: any) => acc + curr.advance_balance, 0).toFixed(0)}
           </p>
         </div>
         <div className="bento-card border-slate-100">
-          <p className="text-[10px] text-slate-400 font-black uppercase tracking-[0.2em] mb-1 md:mb-2">Deductions</p>
+          <p className="text-[10px] text-slate-400 font-black uppercase tracking-[0.2em] mb-1 md:mb-2">{t('deductions')}</p>
           <p className="text-xl md:text-4xl font-display font-bold text-slate-900 tracking-tight">
             ₹{filteredBilling.reduce((acc: any, curr: any) => acc + curr.total_feed + (curr.total_deduction || 0), 0).toFixed(0)}
           </p>
         </div>
         <div className="bento-card bg-slate-900 text-white shadow-2xl">
-          <p className="text-[10px] text-slate-400 font-black uppercase tracking-[0.2em] mb-1 md:mb-2">Net Payout</p>
+          <p className="text-[10px] text-slate-400 font-black uppercase tracking-[0.2em] mb-1 md:mb-2">{t('netPayout')}</p>
           <p className="text-xl md:text-4xl font-display font-bold tracking-tight">
             ₹{filteredBilling.reduce((acc: any, curr: any) => acc + curr.final_payable, 0).toFixed(0)}
           </p>

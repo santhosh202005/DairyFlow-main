@@ -256,24 +256,61 @@ async function startServer() {
     const { phone } = req.body;
     if (!phone) return res.status(400).json({ success: false, message: "Phone number is required" });
 
-    const result = await db.execute({ sql: "SELECT * FROM customers WHERE phone = ?", args: [phone] });
-    if (!result.rows[0]) return res.status(404).json({ success: false, message: "No customer found with this phone number" });
+    // Validate: must be a 10-digit Indian mobile number
+    const cleanPhone = phone.replace(/\D/g, "").slice(-10);
+    if (cleanPhone.length !== 10) {
+      return res.status(400).json({ success: false, message: "Enter a valid 10-digit phone number" });
+    }
+
+    const result = await db.execute({ sql: "SELECT * FROM customers WHERE phone = ?", args: [cleanPhone] });
+    if (!result.rows[0]) {
+      return res.status(404).json({ success: false, message: "No customer found with this phone number" });
+    }
 
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
-    otpStore.set(phone, { otp, expiresAt: Date.now() + 5 * 60 * 1000 });
-    console.log(`[OTP] Generated for ${phone}: ${otp}`);
-    res.json({ success: true, message: "OTP sent successfully" });
+    otpStore.set(cleanPhone, { otp, expiresAt: Date.now() + 5 * 60 * 1000 });
+
+    const apiKey = process.env.FAST2SMS_API_KEY;
+    if (apiKey && apiKey !== "your_fast2sms_api_key_here") {
+      // Send real SMS via Fast2SMS
+      try {
+        const smsRes = await fetch("https://www.fast2sms.com/dev/bulkV2", {
+          method: "POST",
+          headers: { authorization: apiKey, "Content-Type": "application/json" },
+          body: JSON.stringify({ route: "otp", variables_values: otp, numbers: cleanPhone }),
+        });
+        const smsData = await smsRes.json() as any;
+        console.log(`[OTP] Fast2SMS response for ${cleanPhone}:`, JSON.stringify(smsData));
+        if (smsData.return === true) {
+          console.log(`[OTP] SMS sent to ${cleanPhone}`);
+          return res.json({ success: true, message: "OTP sent to your registered mobile number" });
+        } else {
+          console.error(`[OTP] Fast2SMS error:`, smsData);
+          console.log(`[OTP] FALLBACK OTP for ${cleanPhone}: ${otp}`);
+          return res.json({ success: true, message: "OTP sent (check server console if SMS fails)" });
+        }
+      } catch (smsErr) {
+        console.error("[OTP] SMS send failed:", smsErr);
+        console.log(`[OTP] FALLBACK OTP for ${cleanPhone}: ${otp}`);
+        return res.json({ success: true, message: "OTP sent (check server console if SMS fails)" });
+      }
+    } else {
+      // Dev mode — no API key configured
+      console.log(`\n[OTP] ⚠️  No FAST2SMS_API_KEY set. OTP for ${cleanPhone}: ${otp}\n`);
+      return res.json({ success: true, message: "Dev mode: OTP printed in server console" });
+    }
   });
 
   app.post("/api/verify-otp", async (req, res) => {
     const { phone, otp } = req.body;
-    const stored = otpStore.get(phone);
+    const cleanPhone = (phone || "").replace(/\D/g, "").slice(-10);
+    const stored = otpStore.get(cleanPhone);
     if (!stored || stored.otp !== otp || stored.expiresAt < Date.now()) {
       return res.status(400).json({ success: false, message: "Invalid or expired OTP" });
     }
-    otpStore.delete(phone);
+    otpStore.delete(cleanPhone);
 
-    const result = await db.execute({ sql: "SELECT * FROM customers WHERE phone = ?", args: [phone] });
+    const result = await db.execute({ sql: "SELECT * FROM customers WHERE phone = ?", args: [cleanPhone] });
     const customer = result.rows[0];
     if (!customer) return res.status(404).json({ success: false, message: "Customer not found" });
 
@@ -296,16 +333,17 @@ async function startServer() {
       return res.status(400).json({ success: false, message: "Phone number, OTP, and new password are required" });
     }
 
-    const stored = otpStore.get(phone);
+    const cleanPhone = phone.replace(/\D/g, "").slice(-10);
+    const stored = otpStore.get(cleanPhone);
     if (!stored || stored.otp !== otp || stored.expiresAt < Date.now()) {
       return res.status(400).json({ success: false, message: "Invalid or expired OTP" });
     }
-    otpStore.delete(phone);
+    otpStore.delete(cleanPhone);
 
     try {
       const result = await db.execute({
         sql: "UPDATE customers SET password = ? WHERE phone = ?",
-        args: [newPassword, phone],
+        args: [newPassword, cleanPhone],
       });
       if (result.rowsAffected === 0) {
         return res.status(404).json({ success: false, message: "No customer found with this phone number" });
