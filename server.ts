@@ -277,7 +277,12 @@ async function startServer() {
         const smsRes = await fetch("https://www.fast2sms.com/dev/bulkV2", {
           method: "POST",
           headers: { authorization: apiKey, "Content-Type": "application/json" },
-          body: JSON.stringify({ route: "otp", variables_values: otp, numbers: cleanPhone }),
+          body: JSON.stringify({
+            route: "q",
+            message: `Your DairyFlow Verification OTP is ${otp}. Valid for 5 minutes.`,
+            language: "english",
+            numbers: cleanPhone
+          }),
         });
         const smsData = await smsRes.json() as any;
         console.log(`[OTP] Fast2SMS response for ${cleanPhone}:`, JSON.stringify(smsData));
