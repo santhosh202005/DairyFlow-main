@@ -275,17 +275,31 @@ async function startServer() {
 
     const apiKey = process.env.FAST2SMS_API_KEY;
     if (apiKey && apiKey !== "your_fast2sms_api_key_here") {
-      // Send real SMS via Fast2SMS
+      // Send real SMS via Fast2SMS (detect DLT vs Quick route)
       try {
+        const dltSenderId = process.env.FAST2SMS_DLT_SENDER_ID;
+        const dltTemplateId = process.env.FAST2SMS_DLT_TEMPLATE_ID;
+
+        const bodyPayload: any = {
+          numbers: cleanPhone
+        };
+
+        if (dltSenderId && dltTemplateId) {
+          bodyPayload.route = "dlt";
+          bodyPayload.sender_id = dltSenderId;
+          bodyPayload.message = dltTemplateId;
+          bodyPayload.template_id = dltTemplateId;
+          bodyPayload.variables_values = otp;
+        } else {
+          bodyPayload.route = "q";
+          bodyPayload.message = `Your DairyFlow Verification OTP is ${otp}. Valid for 5 minutes.`;
+          bodyPayload.language = "english";
+        }
+
         const smsRes = await fetch("https://www.fast2sms.com/dev/bulkV2", {
           method: "POST",
           headers: { authorization: apiKey, "Content-Type": "application/json" },
-          body: JSON.stringify({
-            route: "q",
-            message: `Your DairyFlow Verification OTP is ${otp}. Valid for 5 minutes.`,
-            language: "english",
-            numbers: cleanPhone
-          }),
+          body: JSON.stringify(bodyPayload),
         });
         const smsData = await smsRes.json() as any;
         console.log(`[OTP] Fast2SMS response for ${cleanPhone}:`, JSON.stringify(smsData));
