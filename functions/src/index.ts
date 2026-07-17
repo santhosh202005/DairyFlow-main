@@ -14,9 +14,6 @@ app.use(express.json());
 const ADMIN_USERNAME = (process.env.ADMIN_USERNAME || "admin").trim();
 const ADMIN_PASSWORD = (process.env.ADMIN_PASSWORD || "admin123").trim();
 
-// OTP Store (in-memory — resets on cold start, acceptable for a small app)
-const otpStore = new Map<string, { otp: string; expiresAt: number }>();
-
 // --- Helpers ---
 function getMonthRange(month: string) {
   return { start: `${month}-01`, end: `${month}-31` };
@@ -102,22 +99,22 @@ app.post("/api/request-otp", async (req: Request, res: Response): Promise<any> =
   }
 
   const otp = Math.floor(100000 + Math.random() * 900000).toString();
-  otpStore.set(phone, { otp, expiresAt: Date.now() + 5 * 60 * 1000 });
+  const doc = snapshot.docs[0];
+  await doc.ref.update({
+    otp,
+    otp_expires_at: Date.now() + 5 * 60 * 1000
+  });
+
   console.log(`[OTP] Generated for ${phone}: ${otp}`);
 
-  res.json({ success: true, message: "OTP sent successfully" });
+  const isDev = process.env.FUNCTIONS_EMULATOR === "true" || process.env.NODE_ENV !== "production";
+  const message = isDev ? `Dev mode: OTP is ${otp}` : "OTP sent successfully";
+  res.json({ success: true, message });
 });
 
 // Verify OTP
 app.post("/api/verify-otp", async (req: Request, res: Response): Promise<any> => {
   const { phone, otp } = req.body;
-  const stored = otpStore.get(phone);
-
-  if (!stored || stored.otp !== otp || stored.expiresAt < Date.now()) {
-    return res.status(400).json({ success: false, message: "Invalid or expired OTP" });
-  }
-
-  otpStore.delete(phone);
 
   const snapshot = await db.collection("customers").where("phone", "==", phone).limit(1).get();
   if (snapshot.empty) {
@@ -126,6 +123,16 @@ app.post("/api/verify-otp", async (req: Request, res: Response): Promise<any> =>
 
   const doc = snapshot.docs[0];
   const customer = doc.data();
+
+  if (!customer.otp || customer.otp !== otp || !customer.otp_expires_at || customer.otp_expires_at < Date.now()) {
+    return res.status(400).json({ success: false, message: "Invalid or expired OTP" });
+  }
+
+  // Clear OTP from Firestore
+  await doc.ref.update({
+    otp: admin.firestore.FieldValue.delete(),
+    otp_expires_at: admin.firestore.FieldValue.delete()
+  });
 
   console.log(`[Login] Customer OTP login successful: ${customer.name}`);
   res.json({
