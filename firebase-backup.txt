@@ -1,9 +1,0 @@
-Archived Firebase-related files were removed/ignored per request.
-- firebase.json
-- .firebaserc
-- firestore.rules
-- firestore.indexes.json
-- functions/
-
-SQLite backend remains in server.ts.
-

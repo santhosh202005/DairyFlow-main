@@ -5,10 +5,12 @@ import { FeedType, FeedPurchase, Customer } from '../types';
 
 interface CattleFeedProps {
   customerId?: string;
+  vendorId?: string;
   isAdmin?: boolean;
+  isVendor?: boolean;
 }
 
-export default function CattleFeed({ customerId, isAdmin = true }: CattleFeedProps) {
+export default function CattleFeed({ customerId, vendorId, isAdmin = true, isVendor = false }: CattleFeedProps) {
   const [activeTab, setActiveTab] = useState<'purchases' | 'reductions' | 'types'>('purchases');
   const [feedTypes, setFeedTypes] = useState<FeedType[]>([]);
   const [purchases, setPurchases] = useState<FeedPurchase[]>([]);
@@ -29,8 +31,8 @@ export default function CattleFeed({ customerId, isAdmin = true }: CattleFeedPro
   useEffect(() => {
     fetchFeedTypes();
     fetchPurchases();
-    if (isAdmin) fetchCustomers();
-  }, [customerId, isAdmin]);
+    if (isAdmin || isVendor) fetchCustomers();
+  }, [customerId, vendorId, isAdmin, isVendor]);
 
   const fetchFeedTypes = () => {
     fetch('/api/feed-types')
@@ -39,14 +41,17 @@ export default function CattleFeed({ customerId, isAdmin = true }: CattleFeedPro
   };
 
   const fetchPurchases = () => {
-    const url = customerId ? `/api/feed-purchases?customerId=${customerId}` : '/api/feed-purchases';
+    let url = '/api/feed-purchases';
+    if (customerId) url = `/api/feed-purchases?customerId=${customerId}`;
+    else if (vendorId) url = `/api/feed-purchases?vendorId=${vendorId}`;
     fetch(url)
       .then(res => res.json())
       .then(data => setPurchases(data));
   };
 
   const fetchCustomers = () => {
-    fetch('/api/customers')
+    const url = vendorId ? `/api/customers?vendorId=${vendorId}` : '/api/customers';
+    fetch(url)
       .then(res => res.json())
       .then(data => setCustomers(data));
   };
@@ -180,7 +185,7 @@ export default function CattleFeed({ customerId, isAdmin = true }: CattleFeedPro
           >
             Feed Purchases
           </button>
-          {isAdmin && (
+          {(isAdmin || isVendor) && (
             <>
               <button
                 onClick={() => setActiveTab('reductions')}
@@ -202,7 +207,7 @@ export default function CattleFeed({ customerId, isAdmin = true }: CattleFeedPro
           )}
         </div>
 
-        {isAdmin && activeTab !== 'reductions' && (
+        {(isAdmin || isVendor) && activeTab !== 'reductions' && (
           <button
             onClick={() => activeTab === 'purchases' ? setIsPurchaseModalOpen(true) : setIsTypeModalOpen(true)}
             className="flex items-center justify-center gap-2 bg-emerald-600 text-white px-5 py-3 rounded-xl hover:bg-emerald-700 transition-colors shadow-sm font-bold text-sm touch-btn w-full sm:w-auto"
@@ -228,22 +233,22 @@ export default function CattleFeed({ customerId, isAdmin = true }: CattleFeedPro
                   <thead>
                     <tr className="bg-slate-50 border-b border-slate-100">
                       <th className="p-3 md:p-4 font-semibold text-slate-600 text-[11px] md:text-sm uppercase tracking-wider">Date</th>
-                      {isAdmin && <th className="p-3 md:p-4 font-semibold text-slate-600 text-[11px] md:text-sm uppercase tracking-wider">Customer</th>}
+                      {(isAdmin || isVendor) && <th className="p-3 md:p-4 font-semibold text-slate-600 text-[11px] md:text-sm uppercase tracking-wider">Customer</th>}
                       <th className="p-3 md:p-4 font-semibold text-slate-600 text-[11px] md:text-sm uppercase tracking-wider">Feed</th>
                       <th className="p-3 md:p-4 font-semibold text-slate-600 text-[11px] md:text-sm uppercase tracking-wider">Qty</th>
                       <th className="p-3 md:p-4 font-semibold text-slate-600 text-[11px] md:text-sm uppercase tracking-wider">Amount</th>
-                      {isAdmin && <th className="p-3 md:p-4 font-semibold text-slate-600 text-[11px] md:text-sm uppercase tracking-wider text-right">Del</th>}
+                      {(isAdmin || isVendor) && <th className="p-3 md:p-4 font-semibold text-slate-600 text-[11px] md:text-sm uppercase tracking-wider text-right">Del</th>}
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
                     {purchases.map((p) => (
                       <tr key={p.id} className="hover:bg-slate-50 transition-colors group">
                         <td className="p-3 md:p-4 text-slate-600 text-xs md:text-sm">{p.date}</td>
-                        {isAdmin && <td className="p-3 md:p-4 font-medium text-slate-900 text-xs md:text-sm">{p.customer_name}</td>}
+                        {(isAdmin || isVendor) && <td className="p-3 md:p-4 font-medium text-slate-900 text-xs md:text-sm">{p.customer_name}</td>}
                         <td className="p-3 md:p-4 text-slate-900 text-xs md:text-sm">{p.feed_name}</td>
                         <td className="p-3 md:p-4 text-slate-600 font-medium text-xs md:text-sm">{p.quantity} U</td>
                         <td className="p-3 md:p-4 text-orange-600 font-bold text-xs md:text-sm">₹{p.amount.toFixed(0)}</td>
-                        {isAdmin && (
+                        {(isAdmin || isVendor) && (
                           <td className="p-3 md:p-4 text-right">
                             <button
                               onClick={() => handleDeletePurchase(p.id)}
@@ -257,7 +262,7 @@ export default function CattleFeed({ customerId, isAdmin = true }: CattleFeedPro
                     ))}
                     {purchases.length === 0 && (
                       <tr>
-                        <td colSpan={isAdmin ? 6 : 4} className="p-8 text-center text-slate-400 italic text-sm">
+                        <td colSpan={(isAdmin || isVendor) ? 6 : 4} className="p-8 text-center text-slate-400 italic text-sm">
                           No feed purchases recorded.
                         </td>
                       </tr>
@@ -294,14 +299,14 @@ export default function CattleFeed({ customerId, isAdmin = true }: CattleFeedPro
                         <p className="text-sm font-bold text-slate-900">{p.feed_name}</p>
                         <div className="flex items-center gap-2 mt-0.5">
                           <span className="text-[10px] text-slate-400">{p.date}</span>
-                          {isAdmin && <span className="text-[10px] text-slate-400">· {p.customer_name}</span>}
+                          {(isAdmin || isVendor) && <span className="text-[10px] text-slate-400">· {p.customer_name}</span>}
                         </div>
                         <p className="text-[11px] text-slate-500 mt-0.5">{p.quantity} Units</p>
                       </div>
                     </div>
                     <div className="flex items-center gap-2 flex-shrink-0">
                       <p className="text-base font-display font-black text-orange-600">₹{p.amount.toFixed(0)}</p>
-                      {isAdmin && (
+                      {(isAdmin || isVendor) && (
                         <button
                           onClick={() => handleDeletePurchase(p.id)}
                           className="p-1.5 rounded-lg text-rose-400 hover:bg-rose-50 transition-colors touch-btn"

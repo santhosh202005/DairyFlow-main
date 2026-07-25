@@ -19,15 +19,21 @@ const SW_VERSION = 'v4';
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', async () => {
     try {
-      // Unregister any previous SW to force fresh asset load after changes
+      // Force unregister all service workers
       const regs = await navigator.serviceWorker.getRegistrations();
-      await Promise.all(regs.map((r) => r.unregister()));
-
-      const reg = await navigator.serviceWorker.register(`/sw.js?version=${SW_VERSION}`);
-      console.log('[PWA] Service Worker registered:', reg.scope, 'version:', SW_VERSION);
+      for (const r of regs) {
+        await r.unregister();
+        console.log('[PWA] Unregistered old service worker:', r.scope);
+      }
+      
+      // Clear all caches to release browser from cached assets
+      if ('caches' in window) {
+        const keys = await caches.keys();
+        await Promise.all(keys.map(k => caches.delete(k)));
+        console.log('[PWA] Cleared all browser caches');
+      }
     } catch (err) {
-      console.warn('[PWA] Service Worker failed:', err);
+      console.warn('[PWA] Cache clearing failed:', err);
     }
   });
 }
-

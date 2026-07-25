@@ -13,18 +13,28 @@ interface SettingsProps {
     role: string | null;
     customerId?: string;
     customerName?: string;
+    customerCode?: string;
     defaultRate?: number;
     customerPhone?: string;
     customerAddress?: string;
     customerGender?: 'male' | 'female';
+    vendorId?: string;
+    vendorName?: string;
+    vendorPhone?: string;
+    vendorAddress?: string;
+    workerId?: string;
+    workerName?: string;
+    workerPhone?: string;
+    profilePicture?: string;
   };
   onLogout: () => void;
+  onProfileUpdate?: (profilePicture: string) => void;
 }
 
 type TabType = 'profile' | 'reports' | 'about' | 'logout';
 
 
-export default function Settings({ authData, onLogout }: SettingsProps) {
+export default function Settings({ authData, onLogout, onProfileUpdate }: SettingsProps) {
   const [activeTab, setActiveTab] = useState<TabType>('profile');
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
   const [language, setLanguage] = useState<string>(() => getStoredLanguage() || 'en');
@@ -32,10 +42,15 @@ export default function Settings({ authData, onLogout }: SettingsProps) {
 
   const tabs = [
     { id: 'profile' as TabType, label: t('profileInfo'), icon: User },
-    { id: 'reports' as TabType, label: authData.role === 'admin' ? t('reports') : t('myReports'), icon: FileText },
-    { id: 'about' as TabType, label: t('about'), icon: Info },
+    ...(authData.role !== 'admin' && authData.role !== 'worker' ? [
+      { id: 'reports' as TabType, label: t('myReports'), icon: FileText },
+    ] : []),
+    ...(authData.role !== 'admin' ? [
+      { id: 'about' as TabType, label: t('about'), icon: Info },
+    ] : []),
     { id: 'logout' as TabType, label: t('signOut'), icon: LogOut, className: 'text-rose-500 hover:bg-rose-50' },
   ];
+
 
 
   return (
@@ -109,31 +124,72 @@ export default function Settings({ authData, onLogout }: SettingsProps) {
               <div className="bg-white rounded-3xl border border-slate-100 p-8 shadow-soft relative overflow-hidden">
                 <div className="absolute top-0 right-0 w-80 h-80 bg-emerald-50 rounded-full blur-3xl -mr-32 -mt-32 opacity-40 pointer-events-none" />
                 <div className="relative z-10 flex flex-col sm:flex-row gap-6 items-center">
-                  <div className="w-24 h-24 rounded-2xl bg-white border-2 border-slate-100 shadow-soft overflow-hidden p-1.5 shrink-0">
+                  <div className="relative group/avatar w-24 h-24 rounded-2xl bg-white border-2 border-slate-100 shadow-soft overflow-hidden p-1.5 shrink-0">
                     <img
-                      src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${authData.role === 'admin' ? 'dairy' : authData.customerId}&gender=${authData.customerGender || 'male'}`}
+                      src={authData.profilePicture || `https://api.dicebear.com/7.x/avataaars/svg?seed=${authData.role === 'admin' ? 'dairy' : authData.role === 'vendor' ? (authData.vendorName || 'vendor') : authData.role === 'worker' ? (authData.workerName || 'worker') : authData.customerId}&gender=${authData.customerGender || 'male'}`}
                       alt="User Avatar"
                       className="w-full h-full rounded-xl object-cover"
                       referrerPolicy="no-referrer"
                     />
+                    {authData.role !== 'admin' && (
+                      <label className="absolute inset-0 bg-black/40 opacity-0 group-hover/avatar:opacity-100 flex flex-col items-center justify-center text-white text-[10px] font-black uppercase tracking-wider cursor-pointer transition-all">
+                        <span>Edit</span>
+                        <input
+                          type="file"
+                          accept="image/*"
+                          className="hidden"
+                          onChange={async (e) => {
+                            const file = e.target.files?.[0];
+                            if (!file) return;
+                            
+                            // Convert image to base64
+                            const reader = new FileReader();
+                            reader.onloadend = async () => {
+                              const base64String = reader.result as string;
+                              try {
+                                const response = await fetch('/api/profile/picture', {
+                                  method: 'PUT',
+                                  headers: {
+                                    'Content-Type': 'application/json',
+                                    'Authorization': `Bearer ${localStorage.getItem('dairy_auth_token')}`
+                                  },
+                                  body: JSON.stringify({ profilePicture: base64String }),
+                                });
+                                if (response.ok && onProfileUpdate) {
+                                  onProfileUpdate(base64String);
+                                }
+                              } catch (err) {
+                                console.error("Error uploading profile photo:", err);
+                              }
+                            };
+                            reader.readAsDataURL(file);
+                          }}
+                        />
+                      </label>
+                    )}
                   </div>
                   <div className="text-center sm:text-left flex-1 space-y-2">
                     <div className="flex flex-wrap items-center justify-center sm:justify-start gap-3">
                       <h2 className="text-3xl font-display font-bold text-slate-900 tracking-tight leading-none">
-                        {authData.role === 'admin' ? t('administrator') : authData.customerName}
+                        {authData.role === 'admin' ? t('administrator') : authData.role === 'vendor' ? authData.vendorName : authData.role === 'worker' ? authData.workerName : authData.customerName}
                       </h2>
                       <span className={`inline-block px-3 py-1 rounded-full text-[9px] font-black uppercase tracking-wider ${
                         authData.role === 'admin' 
                           ? 'bg-purple-100 text-purple-700' 
+                          : authData.role === 'vendor'
+                          ? 'bg-blue-100 text-blue-700'
+                          : authData.role === 'worker'
+                          ? 'bg-amber-100 text-amber-700'
                           : 'bg-emerald-100 text-emerald-700'
                       }`}>
-                        {authData.role === 'admin' ? t('ownerAdmin') : t('registeredFarmer')}
+                        {authData.role === 'admin' ? t('ownerAdmin') : authData.role === 'vendor' ? 'Vendor' : authData.role === 'worker' ? 'Worker' : t('registeredFarmer')}
                       </span>
                     </div>
                     <p className="text-sm font-medium text-slate-400">
-                      {authData.role === 'admin' ? t('systemManagementAuthority') : `Farmer Identification Number: #F-${authData.customerId}`}
+                      {authData.role === 'admin' ? t('systemManagementAuthority') : authData.role === 'vendor' ? 'Registered Vendor Account' : authData.role === 'worker' ? 'Worker Account' : `Farmer Identification Number: #F-${authData.customerId}`}
                     </p>
                   </div>
+
                 </div>
               </div>
 
@@ -147,19 +203,27 @@ export default function Settings({ authData, onLogout }: SettingsProps) {
                   <div className="space-y-4">
                     <div>
                       <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">{t('fullName')}</p>
-                      <p className="text-sm font-bold text-slate-800">{authData.role === 'admin' ? 'DairyFlow Admin' : authData.customerName}</p>
+                      <p className="text-sm font-bold text-slate-800">
+                        {authData.role === 'admin' ? 'DairyFlow Admin' : authData.role === 'vendor' ? authData.vendorName : authData.role === 'worker' ? authData.workerName : authData.customerName}
+                      </p>
                     </div>
-                    {authData.role !== 'admin' && (
+                    {authData.role === 'customer' && (
                       <div>
                         <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">{t('farmerAccountId')}</p>
                         <p className="text-sm font-mono font-bold text-slate-800">F-{authData.customerId}</p>
+                      </div>
+                    )}
+                    {authData.role === 'worker' && (
+                      <div>
+                        <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Worker ID</p>
+                        <p className="text-sm font-mono font-bold text-slate-800">W-{authData.workerId}</p>
                       </div>
                     )}
                     <div>
                       <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">{t('contactPhone')}</p>
                       <div className="flex items-center gap-2 text-sm font-bold text-slate-800">
                         <Phone size={14} className="text-slate-400" />
-                        <span>{authData.customerPhone || (authData.role === 'admin' ? '9042141951' : 'Not Provided')}</span>
+                        <span>{authData.role === 'vendor' ? authData.vendorPhone : authData.role === 'worker' ? authData.workerPhone : (authData.customerPhone || (authData.role === 'admin' ? '9042141951' : 'Not Provided'))}</span>
                       </div>
                     </div>
                   </div>
@@ -178,13 +242,15 @@ export default function Settings({ authData, onLogout }: SettingsProps) {
                         <p className="text-[9px] text-slate-400 font-bold mt-1 uppercase">{t('standardQualityMultiplier')}</p>
                       </div>
                     )}
-                    <div>
-                      <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">{t('registeredAddress')}</p>
-                      <div className="flex items-start gap-2 text-sm font-bold text-slate-800">
-                        <MapPin size={14} className="text-slate-400 mt-0.5 shrink-0" />
-                        <span className="leading-relaxed">{authData.customerAddress || (authData.role === 'admin' ? 'Arcot' : t('noAddressProvided'))}</span>
+                    {authData.role !== 'worker' && (
+                      <div>
+                        <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">{t('registeredAddress')}</p>
+                        <div className="flex items-start gap-2 text-sm font-bold text-slate-800">
+                          <MapPin size={14} className="text-slate-400 mt-0.5 shrink-0" />
+                          <span className="leading-relaxed">{authData.role === 'vendor' ? authData.vendorAddress : (authData.customerAddress || (authData.role === 'admin' ? 'Arcot' : t('noAddressProvided')))}</span>
+                        </div>
                       </div>
-                    </div>
+                    )}
 
                     <div>
                       <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">{t('appLanguage')}</p>
@@ -211,23 +277,32 @@ export default function Settings({ authData, onLogout }: SettingsProps) {
           )}
 
           {/* Reports Tab */}
-          {activeTab === 'reports' && (
+          {activeTab === 'reports' && authData.role !== 'admin' && authData.role !== 'worker' && (
             <motion.div
+
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
             >
-              <Billing customerId={authData.role === 'admin' ? undefined : authData.customerId} />
+              <Billing 
+                customerId={authData.customerId} 
+                isWorker={authData.role === 'worker'}
+                workerId={authData.workerId}
+              />
             </motion.div>
           )}
 
           {/* About Tab */}
-          {activeTab === 'about' && (
+          {activeTab === 'about' && authData.role !== 'admin' && (
             <motion.div
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
               className="bg-white rounded-3xl border border-slate-100 p-2 md:p-6 shadow-soft"
             >
-              <About />
+              <About 
+                vendorName={authData.vendorName}
+                vendorPhone={authData.vendorPhone}
+                vendorAddress={authData.vendorAddress}
+              />
             </motion.div>
           )}
 

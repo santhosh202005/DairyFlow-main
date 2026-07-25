@@ -6,10 +6,12 @@ import { useTranslation } from '../i18n';
 
 interface AdvancesProps {
   customerId?: string;
+  vendorId?: string;
   isAdmin?: boolean;
+  isVendor?: boolean;
 }
 
-export default function Advances({ customerId, isAdmin = true }: AdvancesProps) {
+export default function Advances({ customerId, vendorId, isAdmin = true, isVendor = false }: AdvancesProps) {
   const { t } = useTranslation();
   const [advances, setAdvances] = useState<Advance[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
@@ -34,9 +36,10 @@ export default function Advances({ customerId, isAdmin = true }: AdvancesProps) 
 
   useEffect(() => {
     fetchAdvances();
-    if (isAdmin) {
+    if (isAdmin || isVendor) {
       fetchCustomers();
-      fetch('/api/stats')
+      const statsUrl = vendorId ? `/api/stats?vendorId=${vendorId}` : '/api/stats';
+      fetch(statsUrl)
         .then(res => res.json())
         .then(data => setGlobalStats(data));
     } else if (customerId) {
@@ -44,10 +47,10 @@ export default function Advances({ customerId, isAdmin = true }: AdvancesProps) 
         .then(res => res.json())
         .then(data => setGlobalStats(data));
     }
-  }, [customerId, isAdmin]);
+  }, [customerId, vendorId, isAdmin, isVendor]);
 
   useEffect(() => {
-    if (isAdmin && formData.customer_id) {
+    if ((isAdmin || isVendor) && formData.customer_id) {
       fetch(`/api/stats?customerId=${formData.customer_id}`)
         .then(res => res.json())
         .then(data => setCustomerStats(data))
@@ -55,17 +58,20 @@ export default function Advances({ customerId, isAdmin = true }: AdvancesProps) 
     } else {
       setCustomerStats(null);
     }
-  }, [formData.customer_id, isAdmin]);
+  }, [formData.customer_id, isAdmin, isVendor]);
 
   const fetchAdvances = () => {
-    const url = customerId ? `/api/advances?customerId=${customerId}` : '/api/advances';
+    let url = '/api/advances';
+    if (customerId) url = `/api/advances?customerId=${customerId}`;
+    else if (vendorId) url = `/api/advances?vendorId=${vendorId}`;
     fetch(url)
       .then(res => res.json())
       .then(data => setAdvances(data));
   };
 
   const fetchCustomers = () => {
-    fetch('/api/customers')
+    const url = vendorId ? `/api/customers?vendorId=${vendorId}` : '/api/customers';
+    fetch(url)
       .then(res => res.json())
       .then(data => setCustomers(data));
   };
@@ -199,8 +205,8 @@ export default function Advances({ customerId, isAdmin = true }: AdvancesProps) 
           {globalStats && (
             <div className="grid grid-cols-4 sm:flex sm:items-center gap-1 sm:gap-0 bg-white p-2 rounded-2xl border border-slate-100 shadow-soft w-full sm:w-auto">
               {[
-                { label: isAdmin ? 'Gross' : 'Total', value: `₹${Math.round(globalStats.monthlyRevenue)}`, color: 'text-slate-900' },
-                { label: 'Repaid', value: `₹${Math.round((globalStats.monthlyDeductions || 0) + (isAdmin ? globalStats.monthlyFeed : 0))}`, color: 'text-emerald-600' },
+                { label: (isAdmin || isVendor) ? 'Gross' : 'Total', value: `₹${Math.round(globalStats.monthlyRevenue)}`, color: 'text-slate-900' },
+                { label: 'Repaid', value: `₹${Math.round((globalStats.monthlyDeductions || 0) + ((isAdmin || isVendor) ? globalStats.monthlyFeed : 0))}`, color: 'text-emerald-600' },
                 { label: 'Debt', value: `₹${Math.round(globalStats.advanceBalance !== undefined ? globalStats.advanceBalance : (globalStats.totalAdvanceBalance ?? 0))}`, color: 'text-orange-600' },
                 { label: 'Net', value: `₹${Math.round(globalStats.pendingPayments)}`, color: 'text-blue-700' },
               ].map((s, i) => (
@@ -211,7 +217,7 @@ export default function Advances({ customerId, isAdmin = true }: AdvancesProps) 
               ))}
             </div>
           )}
-          {isAdmin && (
+          {(isAdmin || isVendor) && (
             <button
               onClick={() => setIsModalOpen(true)}
               className="flex items-center justify-center gap-2 bg-blue-600 text-white px-5 py-3 rounded-xl font-bold hover:bg-blue-700 transition-all shadow-lg shadow-blue-100 active:scale-95 text-sm touch-btn w-full sm:w-auto shrink-0"
@@ -230,10 +236,10 @@ export default function Advances({ customerId, isAdmin = true }: AdvancesProps) 
             <thead>
               <tr className="bg-slate-50/50 border-b border-slate-50">
                 <th className="px-4 md:px-8 py-3 md:py-5 font-black text-slate-400 text-[10px] uppercase tracking-[0.2em]">{t('date')}</th>
-                {isAdmin && <th className="px-4 md:px-8 py-3 md:py-5 font-black text-slate-400 text-[10px] uppercase tracking-[0.2em]">Farmer</th>}
-                <th className="px-4 md:px-8 py-3 md:py-5 font-black text-slate-400 text-[10px] uppercase tracking-[0.2em]">Type</th>
-                <th className="px-4 md:px-8 py-3 md:py-5 font-black text-slate-400 text-[10px] uppercase tracking-[0.2em] text-right">Amount</th>
-                {isAdmin && <th className="px-4 md:px-8 py-3 md:py-5 font-black text-slate-400 text-[10px] uppercase tracking-[0.2em] text-right">Del</th>}
+                {(isAdmin || isVendor) && <th className="px-4 md:px-8 py-3 md:py-5 font-black text-slate-400 text-[10px] uppercase tracking-[0.2em]">{t('farmer')}</th>}
+                <th className="px-4 md:px-8 py-3 md:py-5 font-black text-slate-400 text-[10px] uppercase tracking-[0.2em]">{t('type')}</th>
+                <th className="px-4 md:px-8 py-3 md:py-5 font-black text-slate-400 text-[10px] uppercase tracking-[0.2em] text-right">{t('amount')}</th>
+                {(isAdmin || isVendor) && <th className="px-4 md:px-8 py-3 md:py-5 font-black text-slate-400 text-[10px] uppercase tracking-[0.2em] text-right">{t('del')}</th>}
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-50">
@@ -243,7 +249,7 @@ export default function Advances({ customerId, isAdmin = true }: AdvancesProps) 
                     <p className="text-xs md:text-sm font-bold text-slate-900">{new Date(advance.date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}</p>
                     <p className="text-[9px] md:text-[10px] text-slate-400 font-medium">{new Date(advance.date).getFullYear()}</p>
                   </td>
-                  {isAdmin && (
+                  {(isAdmin || isVendor) && (
                     <td className="px-4 md:px-8 py-3 md:py-6">
                       <div className="flex items-center gap-2">
                         <div className="w-6 h-6 md:w-8 md:h-8 rounded-lg bg-slate-100 flex items-center justify-center text-slate-600 font-bold text-[10px] uppercase">
@@ -258,13 +264,13 @@ export default function Advances({ customerId, isAdmin = true }: AdvancesProps) 
                       advance.type === 'deduction' ? 'bg-emerald-50 text-emerald-600' : 'bg-blue-50 text-blue-600'
                     }`}>
                       <div className={`w-1 h-1 rounded-full ${advance.type === 'deduction' ? 'bg-emerald-500' : 'bg-blue-500'}`} />
-                      {advance.type === 'deduction' ? 'Bill Reduction' : 'Cash Advance'}
+                      {advance.type === 'deduction' ? t('billReduction') : t('cashAdvance')}
                     </span>
                   </td>
                   <td className={`px-4 md:px-8 py-3 md:py-6 font-display font-bold text-right text-base md:text-lg ${
                     advance.type === 'deduction' ? 'text-emerald-700' : 'text-blue-700'
                   }`}>₹{advance.amount.toFixed(0)}</td>
-                  {isAdmin && (
+                  {(isAdmin || isVendor) && (
                     <td className="px-4 md:px-8 py-3 md:py-6 text-right">
                       <button
                         disabled={deletingId === advance.id}
@@ -283,7 +289,7 @@ export default function Advances({ customerId, isAdmin = true }: AdvancesProps) 
               ))}
               {advances.length === 0 && (
                 <tr>
-                  <td colSpan={isAdmin ? 5 : 3} className="p-14 md:p-20 text-center">
+                  <td colSpan={(isAdmin || isVendor) ? 5 : 3} className="p-14 md:p-20 text-center">
                     <div className="w-12 h-12 md:w-16 md:h-16 rounded-2xl md:rounded-[1.5rem] bg-slate-50 flex items-center justify-center text-slate-300 mx-auto mb-3 md:mb-4">
                       <Wallet size={26} className="md:hidden" />
                       <Wallet size={32} className="hidden md:block" />
@@ -328,20 +334,20 @@ export default function Advances({ customerId, isAdmin = true }: AdvancesProps) 
                     <span className={`text-[9px] font-black uppercase px-2 py-0.5 rounded-full ${
                       advance.type === 'deduction' ? 'bg-emerald-50 text-emerald-600' : 'bg-blue-50 text-blue-600'
                     }`}>
-                      {advance.type === 'deduction' ? 'Bill Reduction' : 'Cash Advance'}
+                      {advance.type === 'deduction' ? t('billReduction') : t('cashAdvance')}
                     </span>
                   </div>
                   <p className="text-[11px] text-slate-500 mt-0.5">
                     {new Date(advance.date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}
                   </p>
-                  {isAdmin && <p className="text-[11px] text-slate-400 font-medium">{advance.customer_name}</p>}
+                  {(isAdmin || isVendor) && <p className="text-[11px] text-slate-400 font-medium">{advance.customer_name}</p>}
                 </div>
               </div>
               <div className="flex items-center gap-2 flex-shrink-0">
                 <p className={`text-base font-display font-black ${
                   advance.type === 'deduction' ? 'text-emerald-700' : 'text-blue-700'
                 }`}>₹{advance.amount.toFixed(0)}</p>
-                {isAdmin && (
+                {(isAdmin || isVendor) && (
                   <button
                     disabled={deletingId === advance.id}
                     onClick={() => setShowConfirmModal(advance.id)}
@@ -423,7 +429,7 @@ export default function Advances({ customerId, isAdmin = true }: AdvancesProps) 
                   </div>
                 </div>
 
-                {isAdmin && customerStats && (
+                {(isAdmin || isVendor) && customerStats && (
                   <motion.div 
                     initial={{ opacity: 0, y: 10 }}
                     animate={{ opacity: 1, y: 0 }}

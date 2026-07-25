@@ -6,7 +6,12 @@ import { useTranslation } from '../i18n';
 
 interface MilkEntriesProps {
   customerId?: string;
+  vendorId?: string;
+  workerId?: string;
+  workerName?: string;
   isAdmin?: boolean;
+  isVendor?: boolean;
+  isWorker?: boolean;
   defaultRate?: number;
 }
 
@@ -17,11 +22,17 @@ const monthNames = ['January','February','March','April','May','June','July','Au
 type SortBy = 'date' | 'customer';
 type SortDir = 'asc' | 'desc';
 
-export default function MilkEntries({ customerId, isAdmin = true, defaultRate }: MilkEntriesProps) {
+const getAuthHeaders = (): Record<string, string> => {
+  const token = localStorage.getItem('dairy_auth_token');
+  return token ? { Authorization: `Bearer ${token}` } : {};
+};
+
+export default function MilkEntries({ customerId, vendorId, workerId, workerName, isAdmin = true, isVendor = false, isWorker = false, defaultRate }: MilkEntriesProps) {
   const { t } = useTranslation();
 
   const [entries, setEntries] = useState<MilkEntry[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
+  const [workers, setWorkers] = useState<any[]>([]);
 
   const [isLoadingEntries, setIsLoadingEntries] = useState(false);
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -49,7 +60,8 @@ export default function MilkEntries({ customerId, isAdmin = true, defaultRate }:
     date: new Date().toISOString().split('T')[0],
     shift: 'AM' as 'AM' | 'PM',
     liters: '',
-    rate: defaultRate?.toString() || ''
+    rate: defaultRate?.toString() || '',
+    worker_id: ''
   });
 
   useEffect(() => {
@@ -63,13 +75,13 @@ export default function MilkEntries({ customerId, isAdmin = true, defaultRate }:
   }, [customerId, defaultRate]);
 
   useEffect(() => {
-    if (formData.customer_id && isAdmin) {
+    if (formData.customer_id && (isAdmin || isVendor)) {
       const customer = customers.find(c => c.id.toString() === formData.customer_id);
       if (customer && customer.default_rate) {
         setFormData(prev => ({ ...prev, rate: customer.default_rate?.toString() || '30' }));
       }
     }
-  }, [formData.customer_id, customers, isAdmin]);
+  }, [formData.customer_id, customers, isAdmin, isVendor]);
 
   useEffect(() => {
     setPage(1);
@@ -77,8 +89,10 @@ export default function MilkEntries({ customerId, isAdmin = true, defaultRate }:
 
   const fetchEntries = () => {
     setIsLoadingEntries(true);
-    const url = customerId ? `/api/entries?customerId=${customerId}` : '/api/entries';
-    fetch(url)
+    let url = '/api/entries';
+    if (customerId) url = `/api/entries?customerId=${customerId}`;
+    else if (vendorId) url = `/api/entries?vendorId=${vendorId}`;
+    fetch(url, { headers: getAuthHeaders() })
       .then(res => res.json())
       .then(data => setEntries(data))
       .catch(() => {
@@ -89,9 +103,9 @@ export default function MilkEntries({ customerId, isAdmin = true, defaultRate }:
 
   useEffect(() => {
     fetchEntries();
-    if (isAdmin) fetchCustomers();
+    if (isAdmin || isVendor) fetchCustomers();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [customerId, isAdmin]);
+  }, [customerId, vendorId, isAdmin, isVendor]);
 
   const filteredEntries = useMemo(() => {
     let res = entries.filter((entry) => entry.date.startsWith(selectedMonthKey));
@@ -132,10 +146,21 @@ export default function MilkEntries({ customerId, isAdmin = true, defaultRate }:
 
 
   const fetchCustomers = () => {
-    fetch('/api/customers')
+    let url = '/api/customers';
+    if (vendorId) url = `/api/customers?vendorId=${vendorId}`;
+    fetch(url, { headers: getAuthHeaders() })
       .then(res => res.json())
       .then(data => setCustomers(data));
   };
+
+  useEffect(() => {
+    if (vendorId) {
+      fetch(`/api/workers?vendorId=${vendorId}`, { headers: getAuthHeaders() })
+        .then(res => res.json())
+        .then(data => setWorkers(data))
+        .catch(() => {});
+    }
+  }, [vendorId]);
 
   const [error, setError] = useState('');
 
@@ -144,12 +169,16 @@ export default function MilkEntries({ customerId, isAdmin = true, defaultRate }:
     setError('');
     const response = await fetch('/api/entries', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        ...getAuthHeaders()
+      },
       body: JSON.stringify({
         ...formData,
         customer_id: formData.customer_id,
         liters: parseFloat(formData.liters),
-        rate: formData.rate ? parseFloat(formData.rate) : undefined
+        rate: formData.rate ? parseFloat(formData.rate) : undefined,
+        worker_id: formData.worker_id || undefined,
       })
     });
 
@@ -163,7 +192,10 @@ export default function MilkEntries({ customerId, isAdmin = true, defaultRate }:
     
     const customer = customers.find(c => c.id.toString() === formData.customer_id);
     const customerName = customer ? customer.name : '';
-    
+
+    const selectedWorker = workers.find(w => w.id.toString() === formData.worker_id);
+    const selectedWorkerName = selectedWorker ? selectedWorker.name : (isWorker ? workerName : undefined);
+
     const newEntry: MilkEntry = {
       id: data.id || Date.now().toString(),
       customer_id: formData.customer_id,
@@ -173,11 +205,13 @@ export default function MilkEntries({ customerId, isAdmin = true, defaultRate }:
       liters: parseFloat(formData.liters),
       rate: currentRate,
       amount: parseFloat(formData.liters) * currentRate,
+      worker_id: formData.worker_id || (isWorker ? workerId : undefined),
+      worker_name: selectedWorkerName,
       created_at: new Date().toISOString()
     };
 
     setEntries(prev => [newEntry, ...prev]);
-    setFormData({ ...formData, customer_id: customerId ? customerId.toString() : '', liters: '' });
+    setFormData({ ...formData, customer_id: customerId ? customerId.toString() : '', liters: '', worker_id: '' });
     fetchEntries();
   };
 
@@ -191,7 +225,7 @@ export default function MilkEntries({ customerId, isAdmin = true, defaultRate }:
     setDeletingId(id);
     setShowConfirmModal(null);
     try {
-      const response = await fetch(`/api/entries/${id}`, { method: 'DELETE' });
+      const response = await fetch(`/api/entries/${id}`, { method: 'DELETE', headers: getAuthHeaders() });
       if (response.ok) {
         fetchEntries();
       } else {
@@ -221,6 +255,7 @@ export default function MilkEntries({ customerId, isAdmin = true, defaultRate }:
       rate: number;
       totalLiters: number;
       totalAmount: number;
+      workers: string[];
     };
 
     const map = new Map<string, Row>();
@@ -239,10 +274,15 @@ export default function MilkEntries({ customerId, isAdmin = true, defaultRate }:
         rate,
         totalLiters: 0,
         totalAmount: 0,
+        workers: [],
       };
 
       if (e.shift === 'AM') row.morningLiters += e.liters;
       else row.eveningLiters += e.liters;
+
+      if (e.worker_name && !row.workers.includes(e.worker_name)) {
+        row.workers.push(e.worker_name);
+      }
 
       row.rate = row.rate || rate;
       row.totalLiters = row.morningLiters + row.eveningLiters;
@@ -389,7 +429,7 @@ export default function MilkEntries({ customerId, isAdmin = true, defaultRate }:
 
       {/* Fixed Add Entry: desktop — hidden while sheet is open */}
       <AnimatePresence>
-        {(isAdmin || Boolean(customerId)) && !isModalOpen && (
+        {(isAdmin || isVendor || Boolean(customerId)) && !isModalOpen && (
           <motion.button
             key="fab-desktop"
             initial={{ opacity: 0, scale: 0.85 }}
@@ -414,7 +454,7 @@ export default function MilkEntries({ customerId, isAdmin = true, defaultRate }:
 
       {/* Sticky Add Entry: mobile — hidden while sheet is open */}
       <AnimatePresence>
-        {(isAdmin || Boolean(customerId)) && !isModalOpen && (
+        {(isAdmin || isVendor || Boolean(customerId)) && !isModalOpen && (
           <motion.div
             key="fab-mobile"
             initial={{ opacity: 0, y: 16 }}
@@ -500,10 +540,10 @@ export default function MilkEntries({ customerId, isAdmin = true, defaultRate }:
                 <th className="px-4 md:px-10 py-3 md:py-5 font-black text-slate-300 text-[10px] uppercase tracking-[0.2em] text-right">Morning Milk (L)</th>
                 <th className="px-4 md:px-10 py-3 md:py-5 font-black text-slate-300 text-[10px] uppercase tracking-[0.2em] text-right">Evening Milk (L)</th>
                 <th className="px-4 md:px-10 py-3 md:py-5 font-black text-slate-300 text-[10px] uppercase tracking-[0.2em] text-right">Total Milk (L)</th>
-                <th className="px-4 md:px-10 py-3 md:py-5 font-black text-slate-300 text-[10px] uppercase tracking-[0.2em] text-right">Rate per Liter</th>
-                <th className="px-4 md:px-10 py-3 md:py-5 font-black text-slate-300 text-[10px] uppercase tracking-[0.2em] text-right">Total Amount</th>
+                {!isWorker && <th className="px-4 md:px-10 py-3 md:py-5 font-black text-slate-300 text-[10px] uppercase tracking-[0.2em] text-right">Rate per Liter</th>}
+                {!isWorker && <th className="px-4 md:px-10 py-3 md:py-5 font-black text-slate-300 text-[10px] uppercase tracking-[0.2em] text-right">Total Amount</th>}
                 <th className="px-4 md:px-10 py-3 md:py-5 font-black text-slate-300 text-[10px] uppercase tracking-[0.2em]">Payment Status</th>
-                {isAdmin && <th className="px-4 md:px-10 py-3 md:py-5 font-black text-slate-300 text-[10px] uppercase tracking-[0.2em] text-right">Action</th>}
+                {(isAdmin || isVendor) && <th className="px-4 md:px-10 py-3 md:py-5 font-black text-slate-300 text-[10px] uppercase tracking-[0.2em] text-right">Action</th>}
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-50">
@@ -516,6 +556,15 @@ export default function MilkEntries({ customerId, isAdmin = true, defaultRate }:
                   </td>
                   <td className="px-4 md:px-10 py-3 md:py-6">
                     <p className="font-bold text-slate-700 text-xs md:text-sm tracking-tight truncate max-w-[120px] md:max-w-none">{row.customer_name}</p>
+                    {row.workers && row.workers.length > 0 ? (
+                      <span className="inline-flex items-center gap-1 text-[10px] font-bold text-blue-700 bg-blue-50 px-2 py-0.5 rounded-full mt-1 border border-blue-100/50">
+                        👷 {row.workers.join(', ')}
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1 text-[10px] font-medium text-slate-400 bg-slate-50 px-2 py-0.5 rounded-full mt-1">
+                        🏢 Vendor Direct
+                      </span>
+                    )}
                   </td>
                   <td className="px-4 md:px-10 py-3 md:py-6 text-right">
                     <p className="text-xs md:text-sm font-bold text-slate-900">{row.morningLiters.toFixed(1)} <span className="text-[9px] uppercase">L</span></p>
@@ -526,16 +575,20 @@ export default function MilkEntries({ customerId, isAdmin = true, defaultRate }:
                   <td className="px-4 md:px-10 py-3 md:py-6 text-right">
                     <p className="text-xs md:text-sm font-bold text-slate-900">{row.totalLiters.toFixed(1)} <span className="text-[9px] uppercase">L</span></p>
                   </td>
-                  <td className="px-4 md:px-10 py-3 md:py-6 text-right">
-                    <p className="text-[10px] font-bold text-slate-700">₹{row.rate}/L</p>
-                  </td>
-                  <td className="px-4 md:px-10 py-3 md:py-6 text-right font-display font-black text-emerald-600 text-base md:text-lg tracking-tight">₹{row.totalAmount.toFixed(0)}</td>
+                  {!isWorker && (
+                    <td className="px-4 md:px-10 py-3 md:py-6 text-right">
+                      <p className="text-[10px] font-bold text-slate-700">₹{row.rate}/L</p>
+                    </td>
+                  )}
+                  {!isWorker && (
+                    <td className="px-4 md:px-10 py-3 md:py-6 text-right font-display font-black text-emerald-600 text-base md:text-lg tracking-tight">₹{row.totalAmount.toFixed(0)}</td>
+                  )}
                   <td className="px-4 md:px-10 py-3 md:py-6">
                     <span className="inline-flex items-center px-2.5 py-1 rounded-lg bg-emerald-50 text-emerald-700 text-[11px] font-black uppercase tracking-widest">
                       Paid
                     </span>
                   </td>
-                  {isAdmin && (
+                  {(isAdmin || isVendor) && (
                     <td className="px-4 md:px-10 py-3 md:py-6 text-right">
                       <button
                         disabled={deletingId === row.id}
@@ -555,7 +608,7 @@ export default function MilkEntries({ customerId, isAdmin = true, defaultRate }:
               ))}
               {monthEntriesGrouped.length === 0 && (
                 <tr>
-                  <td colSpan={isAdmin ? 7 : 5} className="py-16 md:py-32 text-center">
+                  <td colSpan={(isAdmin || isVendor) ? 7 : 5} className="py-16 md:py-32 text-center">
                     <div className="w-14 h-14 md:w-20 md:h-20 rounded-2xl md:rounded-[2rem] bg-slate-50 flex items-center justify-center text-slate-200 mx-auto mb-4 md:mb-6">
                       <Droplets size={28} className="md:hidden" />
                       <Droplets size={40} className="hidden md:block" />
@@ -604,15 +657,30 @@ export default function MilkEntries({ customerId, isAdmin = true, defaultRate }:
                       entry.shift === 'AM' ? 'bg-amber-100 text-amber-700' : 'bg-indigo-100 text-indigo-700'
                     }`}>{entry.shift}</span>
                   </div>
-                  {isAdmin && <p className="text-[11px] text-slate-400 font-medium mt-0.5">{entry.customer_name}</p>}
+                  <div className="flex items-center gap-2 mt-0.5">
+                    {(isAdmin || isVendor) && (
+                      <p className="text-[11px] text-slate-400 font-medium">{entry.customer_name}</p>
+                    )}
+                    {entry.worker_name ? (
+                      <span className="inline-flex items-center gap-1 text-[9px] font-bold text-blue-700 bg-blue-50 px-1.5 py-0.5 rounded border border-blue-100/50">
+                        👷 {entry.worker_name}
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1 text-[9px] font-medium text-slate-400 bg-slate-50 px-1.5 py-0.5 rounded">
+                        🏢 {t('vendorDirect')}
+                      </span>
+                    )}
+                  </div>
                 </div>
               </div>
               <div className="text-right flex-shrink-0">
-                <p className="text-base font-display font-black text-emerald-600">₹{entry.amount.toFixed(0)}</p>
-                <p className="text-[10px] text-slate-400">{entry.liters.toFixed(1)} L · ₹{entry.rate}/L</p>
+                {!isWorker && <p className="text-base font-display font-black text-emerald-600">₹{entry.amount.toFixed(0)}</p>}
+                <p className="text-[10px] text-slate-400">
+                  {entry.liters.toFixed(1)} L {!isWorker && `· ₹${entry.rate}/L`}
+                </p>
               </div>
             </div>
-            {isAdmin && (
+            {(isAdmin || isVendor) && (
               <div className="flex justify-end mt-2 pt-2 border-t border-slate-50">
                 <button
                   disabled={deletingId === entry.id}
@@ -620,7 +688,7 @@ export default function MilkEntries({ customerId, isAdmin = true, defaultRate }:
                   className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-bold text-rose-500 hover:bg-rose-50 transition-colors touch-btn"
                 >
                   <Trash2 size={13} />
-                  Delete
+                  {t('delete')}
                 </button>
               </div>
             )}
@@ -671,10 +739,10 @@ export default function MilkEntries({ customerId, isAdmin = true, defaultRate }:
               )}
               
               <div className="space-y-4">
-                {isAdmin && (
+                {(isAdmin || isVendor) && (
                   <div>
                     <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 px-1">
-                      Select Farmer
+                      {t('selectFarmer')}
                     </label>
                     <div className="relative group">
                       <User className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-300 group-focus-within:text-emerald-500 transition-colors" size={16} />
@@ -684,7 +752,7 @@ export default function MilkEntries({ customerId, isAdmin = true, defaultRate }:
                         onChange={(e) => setFormData({ ...formData, customer_id: e.target.value })}
                         className="input-base pl-9 appearance-none"
                       >
-                        <option value="">Farmer lookup...</option>
+                        <option value="">{t('farmerLookup') || 'Farmer lookup...'}</option>
                         {customers.map(c => (
                           <option key={c.id} value={c.id}>{c.name}</option>
                         ))}
@@ -693,8 +761,29 @@ export default function MilkEntries({ customerId, isAdmin = true, defaultRate }:
                   </div>
                 )}
                 
+                {!isWorker && workers.length > 0 && (
+                  <div>
+                    <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 px-1">
+                      {t('collectedByWorker')}
+                    </label>
+                    <div className="relative group">
+                      <User className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-300 group-focus-within:text-emerald-500 transition-colors" size={16} />
+                      <select
+                        value={formData.worker_id}
+                        onChange={(e) => setFormData({ ...formData, worker_id: e.target.value })}
+                        className="input-base pl-9 appearance-none"
+                      >
+                        <option value="">{t('vendorDirect')}</option>
+                        {workers.map(w => (
+                          <option key={w.id} value={w.id}>{w.name} (@{w.username})</option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+                )}
+                
                 <div>
-                  <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 px-1">Date</label>
+                  <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 px-1">{t('date')}</label>
                   <div className="relative group">
                     <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-300 group-focus-within:text-emerald-500 transition-colors" size={16} />
                     <input
@@ -709,7 +798,7 @@ export default function MilkEntries({ customerId, isAdmin = true, defaultRate }:
 
                 <div className="grid grid-cols-2 gap-3">
                   <div>
-                    <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 px-1">Volume (L)</label>
+                    <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 px-1">{t('volumeL') || 'Volume (L)'}</label>
                     <div className="relative group">
                       <div className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-300 font-black text-xs uppercase">L</div>
                       <input
@@ -723,9 +812,9 @@ export default function MilkEntries({ customerId, isAdmin = true, defaultRate }:
                       />
                     </div>
                   </div>
-                  {isAdmin && (
+                  {(isAdmin || isVendor) && !isWorker && (
                     <div>
-                      <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 px-1">Rate (₹/L)</label>
+                      <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 px-1">{t('ratePerL')}</label>
                       <div className="relative group">
                         <div className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-300 font-black text-xs">₹</div>
                         <input
@@ -743,7 +832,7 @@ export default function MilkEntries({ customerId, isAdmin = true, defaultRate }:
                 </div>
 
                 <div>
-                  <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 px-1">Batch Schedule</label>
+                  <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 px-1">{t('batchSchedule')}</label>
                   <div className="p-1 bg-slate-100 rounded-xl flex gap-1">
                     <button
                       type="button"
@@ -752,7 +841,7 @@ export default function MilkEntries({ customerId, isAdmin = true, defaultRate }:
                         formData.shift === 'AM' ? 'bg-white text-emerald-600 shadow-sm' : 'text-slate-400 hover:text-slate-600'
                       }`}
                     >
-                      🌅 Morning
+                      🌅 {t('morning')}
                     </button>
                     <button
                       type="button"
@@ -761,7 +850,7 @@ export default function MilkEntries({ customerId, isAdmin = true, defaultRate }:
                         formData.shift === 'PM' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-400 hover:text-slate-600'
                       }`}
                     >
-                      🌙 Evening
+                      🌙 {t('evening')}
                     </button>
                   </div>
                 </div>
@@ -769,21 +858,23 @@ export default function MilkEntries({ customerId, isAdmin = true, defaultRate }:
             </div>  {/* end padding div */}
 
                 {/* Valuation card */}
-                <div className="mx-5 sm:mx-8 mb-4 p-4 rounded-2xl bg-emerald-900 text-white shadow-2xl relative overflow-hidden">
-                  <div className="absolute -right-4 -top-4 w-24 h-24 bg-white/5 rounded-full blur-2xl" />
-                  <div className="flex justify-between items-center relative z-10">
-                    <div>
-                      <p className="text-[9px] font-black uppercase tracking-[0.2em] text-emerald-400 mb-0.5">Estimated Valuation</p>
-                      <p className="text-2xl sm:text-4xl font-display font-bold tracking-tight">
-                        ₹{formData.liters ? (parseFloat(formData.liters) * currentRate).toFixed(0) : '0'}
-                      </p>
-                    </div>
-                    <div className="text-right">
-                      <p className="text-[9px] font-black uppercase tracking-widest text-emerald-500">Active Rate</p>
-                      <p className="text-sm font-bold text-emerald-400">₹{currentRate}/L</p>
+                {!isWorker && (
+                  <div className="mx-5 sm:mx-8 mb-4 p-4 rounded-2xl bg-emerald-900 text-white shadow-2xl relative overflow-hidden">
+                    <div className="absolute -right-4 -top-4 w-24 h-24 bg-white/5 rounded-full blur-2xl" />
+                    <div className="flex justify-between items-center relative z-10">
+                      <div>
+                        <p className="text-[9px] font-black uppercase tracking-[0.2em] text-emerald-400 mb-0.5">Estimated Valuation</p>
+                        <p className="text-2xl sm:text-4xl font-display font-bold tracking-tight">
+                          ₹{formData.liters ? (parseFloat(formData.liters) * currentRate).toFixed(0) : '0'}
+                        </p>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-[9px] font-black uppercase tracking-widest text-emerald-500">Active Rate</p>
+                        <p className="text-sm font-bold text-emerald-400">₹{currentRate}/L</p>
+                      </div>
                     </div>
                   </div>
-                </div>
+                )}
               </div> {/* end sheet-body */}
 
               {/* Fixed footer */}
@@ -793,7 +884,7 @@ export default function MilkEntries({ customerId, isAdmin = true, defaultRate }:
                   onClick={() => setIsModalOpen(false)}
                   className="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-500 py-4 rounded-xl font-black uppercase tracking-[0.2em] text-xs transition-all active:scale-95 touch-btn"
                 >
-                  Cancel
+                  {t('cancel')}
                 </button>
                 <button
                   type="submit"

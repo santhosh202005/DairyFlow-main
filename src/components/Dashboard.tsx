@@ -5,23 +5,36 @@ import { Stats } from '../types';
 
 interface DashboardProps {
   customerId?: string;
+  vendorId?: string;
+  workerId?: string;
   onNavigate?: (view: any) => void;
 }
 
-export default function Dashboard({ customerId, onNavigate }: DashboardProps) {
+export default function Dashboard({ customerId, vendorId, workerId, onNavigate }: DashboardProps) {
   const [stats, setStats] = useState<Stats | null>(null);
   const { t } = useTranslation();
 
   useEffect(() => {
-    const url = customerId ? `/api/stats?customerId=${customerId}` : '/api/stats';
+    let url = '/api/stats';
+    if (customerId) url = `/api/stats?customerId=${customerId}`;
+    else if (vendorId) url = `/api/stats?vendorId=${vendorId}`;
+    else if (workerId) url = `/api/stats?workerId=${workerId}`;
     fetch(url)
       .then(res => res.json())
       .then(data => setStats(data));
-  }, [customerId]);
+  }, [customerId, vendorId, workerId]);
 
   if (!stats) return <div className="animate-pulse">Loading stats...</div>;
 
-  const statCards = [
+  const statCards = workerId ? [
+    { 
+      label: 'Milk Collected Today', 
+      value: `${stats.todaySupply} L`, 
+      icon: Milk, 
+      color: 'bg-emerald-500',
+      subtext: `AM: ${stats.todayAM}L | PM: ${stats.todayPM}L`
+    }
+  ] : [
     ...(customerId ? [] : [{ label: t('totalCustomers'), value: stats.totalCustomers, icon: Users, color: 'bg-blue-500' }]),
     { 
       label: t('todaysSupply'), 
@@ -41,7 +54,7 @@ export default function Dashboard({ customerId, onNavigate }: DashboardProps) {
         <div>
           <div className="flex items-center gap-3 mb-2 md:mb-3">
             <span className="px-3 py-1 bg-emerald-100 text-emerald-700 text-[10px] font-black rounded-full uppercase tracking-[0.15em]">
-              {customerId ? t('monitor') : t('administratorControl')}
+              {workerId ? 'Worker Dashboard' : customerId ? t('monitor') : t('administratorControl')}
             </span>
           </div>
           <h2 className="text-3xl md:text-5xl font-display font-bold text-slate-900 tracking-tight leading-none mb-2 md:mb-3">
@@ -52,7 +65,7 @@ export default function Dashboard({ customerId, onNavigate }: DashboardProps) {
             )}
           </h2>
           <p className="text-slate-500 font-medium max-w-md text-sm md:text-base">
-            {customerId ? "Real-time metrics for your dairy supply and financial standing." : t('administratorControl')}
+            {workerId ? "Real-time tracking of milk collection performance and daily goals." : customerId ? "Real-time metrics for your dairy supply and financial standing." : t('administratorControl')}
           </p>
         </div>
         <div className="bg-white px-4 py-2 md:px-6 md:py-3 rounded-[1.2rem] border border-slate-100 shadow-soft">
@@ -104,7 +117,7 @@ export default function Dashboard({ customerId, onNavigate }: DashboardProps) {
           </div>
         </div>
         
-        {!customerId && (
+        {!customerId && !workerId && (
           <div className="bento-card border-emerald-100 bg-emerald-50/20">
             <h3 className="text-xl font-display font-bold text-slate-900 tracking-tight mb-8">Operations</h3>
             <div className="grid grid-cols-1 gap-4">

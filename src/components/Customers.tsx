@@ -1,12 +1,23 @@
 import React, { useState, useEffect } from 'react';
-import { Plus, Edit2, Trash2, X, Milk, Phone, MapPin, User } from 'lucide-react';
+import { Plus, Edit2, Trash2, X, Milk, Phone, MapPin, User, CreditCard, Landmark } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Customer } from '../types';
 import MilkEntries from './MilkEntries';
 import SearchBar from './SearchBar';
 import { useDebouncedValue } from '../hooks/useDebouncedValue';
 
-export default function Customers() {
+interface CustomersProps {
+  vendorId?: string;
+  isVendor?: boolean;
+  readOnly?: boolean;
+}
+
+const getAuthHeaders = (): Record<string, string> => {
+  const token = localStorage.getItem('dairy_auth_token');
+  return token ? { Authorization: `Bearer ${token}` } : {};
+};
+
+export default function Customers({ vendorId, isVendor, readOnly = false }: CustomersProps) {
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [historyCustomerId, setHistoryCustomerId] = useState<string | null>(null);
@@ -22,14 +33,19 @@ export default function Customers() {
     password: '',
     default_rate: 30,
     gender: 'male' as 'male' | 'female',
+    bank_name: '',
+    account_number: '',
+    ifsc_code: '',
+    upi_id: '',
   });
 
   useEffect(() => {
     fetchCustomers();
-  }, []);
+  }, [vendorId]);
 
   const fetchCustomers = () => {
-    fetch('/api/customers')
+    const url = vendorId ? `/api/customers?vendorId=${vendorId}` : '/api/customers';
+    fetch(url, { headers: getAuthHeaders() })
       .then(res => res.json())
       .then(data => setCustomers(data));
   };
@@ -38,22 +54,25 @@ export default function Customers() {
     e.preventDefault();
     const url = editingCustomer ? `/api/customers/${editingCustomer.id}` : '/api/customers';
     const method = editingCustomer ? 'PUT' : 'POST';
+    const payload: any = { ...formData };
+    // Auto-assign vendor_id when vendor is creating a customer
+    if (!editingCustomer && vendorId) payload.vendor_id = vendorId;
 
     await fetch(url, {
       method,
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(formData)
+      headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+      body: JSON.stringify(payload)
     });
 
     setIsModalOpen(false);
     setEditingCustomer(null);
-    setFormData({ name: '', phone: '', address: '', username: '', password: '', default_rate: 30, gender: 'male' });
+    setFormData({ name: '', phone: '', address: '', username: '', password: '', default_rate: 30, gender: 'male', bank_name: '', account_number: '', ifsc_code: '', upi_id: '' });
     fetchCustomers();
   };
 
   const handleDelete = async (id: string) => {
     if (!confirm('Are you sure you want to delete this customer?')) return;
-    await fetch(`/api/customers/${id}`, { method: 'DELETE' });
+    await fetch(`/api/customers/${id}`, { method: 'DELETE', headers: getAuthHeaders() });
     fetchCustomers();
   };
 
@@ -75,17 +94,24 @@ export default function Customers() {
             className="w-full"
           />
         </div>
-        <button
-          onClick={() => {
-            setEditingCustomer(null);
-            setFormData({ name: '', phone: '', address: '', username: '', password: '', default_rate: 30, gender: 'male' });
-            setIsModalOpen(true);
-          }}
-          className="flex items-center justify-center gap-2 bg-emerald-600 text-white px-5 py-3 rounded-xl hover:bg-emerald-700 transition-colors shadow-sm font-bold text-sm touch-btn w-full sm:w-auto"
-        >
-          <Plus size={18} />
-          Add Customer
-        </button>
+        {!readOnly && (
+          <button
+            onClick={() => {
+              setEditingCustomer(null);
+              setFormData({ name: '', phone: '', address: '', username: '', password: '', default_rate: 30, gender: 'male', bank_name: '', account_number: '', ifsc_code: '', upi_id: '' });
+              setIsModalOpen(true);
+            }}
+            className="flex items-center justify-center gap-2 bg-emerald-600 text-white px-5 py-3 rounded-xl hover:bg-emerald-700 transition-colors shadow-sm font-bold text-sm touch-btn w-full sm:w-auto"
+          >
+            <Plus size={18} />
+            Add Customer
+          </button>
+        )}
+        {readOnly && (
+          <span className="inline-flex items-center gap-2 px-4 py-2 bg-slate-100 text-slate-500 rounded-xl text-sm font-medium">
+            👁️ View Only
+          </span>
+        )}
       </div>
 
       {/* Desktop/tablet table */}
@@ -120,30 +146,38 @@ export default function Customers() {
                       >
                         <Milk size={15} />
                       </button>
-                      <button
-                        onClick={() => {
-                          setEditingCustomer(customer);
-                          setFormData({ 
-                            name: customer.name, 
-                            phone: customer.phone, 
-                            address: customer.address,
-                            username: customer.username || '',
-                            password: customer.password || '',
-                            default_rate: customer.default_rate || 30,
-                            gender: customer.gender || 'male',
-                          });
-                          setIsModalOpen(true);
-                        }}
-                        className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors touch-btn"
-                      >
-                        <Edit2 size={15} />
-                      </button>
-                      <button
-                        onClick={() => handleDelete(customer.id)}
-                        className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors touch-btn"
-                      >
-                        <Trash2 size={15} />
-                      </button>
+                      {!readOnly && (
+                        <>
+                          <button
+                            onClick={() => {
+                              setEditingCustomer(customer);
+                              setFormData({ 
+                                name: customer.name, 
+                                phone: customer.phone, 
+                                address: customer.address,
+                                username: customer.username || '',
+                                password: customer.password || '',
+                                default_rate: customer.default_rate || 30,
+                                gender: customer.gender || 'male',
+                                bank_name: customer.bank_name || '',
+                                account_number: customer.account_number || '',
+                                ifsc_code: customer.ifsc_code || '',
+                                upi_id: customer.upi_id || '',
+                              });
+                              setIsModalOpen(true);
+                            }}
+                            className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors touch-btn"
+                          >
+                            <Edit2 size={15} />
+                          </button>
+                          <button
+                            onClick={() => handleDelete(customer.id)}
+                            className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors touch-btn"
+                          >
+                            <Trash2 size={15} />
+                          </button>
+                        </>
+                      )}
                     </div>
                   </td>
                 </tr>
@@ -203,30 +237,38 @@ export default function Customers() {
                 >
                   <Milk size={16} />
                 </button>
-                <button
-                  onClick={() => {
-                    setEditingCustomer(customer);
-                    setFormData({ 
-                      name: customer.name, 
-                      phone: customer.phone, 
-                      address: customer.address,
-                      username: customer.username || '',
-                      password: customer.password || '',
-                      default_rate: customer.default_rate || 30,
-                      gender: customer.gender || 'male',
-                    });
-                    setIsModalOpen(true);
-                  }}
-                  className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors touch-btn"
-                >
-                  <Edit2 size={16} />
-                </button>
-                <button
-                  onClick={() => handleDelete(customer.id)}
-                  className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors touch-btn"
-                >
-                  <Trash2 size={16} />
-                </button>
+                {!readOnly && (
+                  <>
+                    <button
+                      onClick={() => {
+                        setEditingCustomer(customer);
+                        setFormData({ 
+                          name: customer.name, 
+                          phone: customer.phone, 
+                          address: customer.address,
+                          username: customer.username || '',
+                          password: customer.password || '',
+                          default_rate: customer.default_rate || 30,
+                          gender: customer.gender || 'male',
+                          bank_name: customer.bank_name || '',
+                          account_number: customer.account_number || '',
+                          ifsc_code: customer.ifsc_code || '',
+                          upi_id: customer.upi_id || '',
+                        });
+                        setIsModalOpen(true);
+                      }}
+                      className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors touch-btn"
+                    >
+                      <Edit2 size={16} />
+                    </button>
+                    <button
+                      onClick={() => handleDelete(customer.id)}
+                      className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors touch-btn"
+                    >
+                      <Trash2 size={16} />
+                    </button>
+                  </>
+                )}
               </div>
             </div>
           </motion.div>
@@ -335,6 +377,59 @@ export default function Customers() {
                     className="input-base"
                   />
                 </div>
+
+                {/* Optional Bank Account Details */}
+                <div className="pt-3 border-t border-slate-100">
+                  <div className="flex items-center gap-1.5 mb-2">
+                    <CreditCard size={14} className="text-emerald-600" />
+                    <span className="text-xs font-bold text-slate-700">Bank Account Details</span>
+                    <span className="text-[10px] text-slate-400 font-normal">(Optional)</span>
+                  </div>
+                  <div className="space-y-3 bg-slate-50/70 p-3.5 rounded-2xl border border-slate-100">
+                    <div>
+                      <label className="block text-[11px] font-medium text-slate-500 mb-1">Bank Name</label>
+                      <input
+                        type="text"
+                        value={formData.bank_name}
+                        onChange={(e) => setFormData({ ...formData, bank_name: e.target.value })}
+                        className="input-base text-xs bg-white"
+                        placeholder="e.g. SBI, HDFC (Optional)"
+                      />
+                    </div>
+                    <div className="grid grid-cols-2 gap-2.5">
+                      <div>
+                        <label className="block text-[11px] font-medium text-slate-500 mb-1">Account Number</label>
+                        <input
+                          type="text"
+                          value={formData.account_number}
+                          onChange={(e) => setFormData({ ...formData, account_number: e.target.value })}
+                          className="input-base text-xs bg-white"
+                          placeholder="Account No. (Optional)"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[11px] font-medium text-slate-500 mb-1">IFSC Code</label>
+                        <input
+                          type="text"
+                          value={formData.ifsc_code}
+                          onChange={(e) => setFormData({ ...formData, ifsc_code: e.target.value })}
+                          className="input-base text-xs uppercase bg-white"
+                          placeholder="e.g. SBIN0001234 (Optional)"
+                        />
+                      </div>
+                    </div>
+                    <div>
+                      <label className="block text-[11px] font-medium text-slate-500 mb-1">UPI ID</label>
+                      <input
+                        type="text"
+                        value={formData.upi_id}
+                        onChange={(e) => setFormData({ ...formData, upi_id: e.target.value })}
+                        className="input-base text-xs bg-white"
+                        placeholder="e.g. farmer@upi (Optional)"
+                      />
+                    </div>
+                  </div>
+                </div>
                   </div> {/* end padding div */}
                 </div> {/* end sheet-body */}
                 <div className="sheet-footer flex gap-3">
@@ -381,7 +476,7 @@ export default function Customers() {
               </button>
             </div>
             <div className="p-4 md:p-6 overflow-y-auto flex-1">
-              <MilkEntries customerId={historyCustomerId} isAdmin={true} />
+              <MilkEntries customerId={historyCustomerId} vendorId={vendorId} isAdmin={true} />
             </div>
             <div className="p-3 md:p-4 border-t border-slate-100 bg-slate-50 text-right">
               <button 

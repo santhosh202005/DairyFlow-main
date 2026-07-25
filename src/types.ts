@@ -1,3 +1,51 @@
+export interface Vendor {
+  id: string;
+  name: string;
+  username: string;
+  phone?: string;
+  address?: string;
+  customer_count?: number;
+  created_at: string;
+}
+export interface Worker {
+  id: string;
+  vendor_id: string;
+  name: string;
+  username: string;
+  password?: string;
+  phone?: string;
+  today_supply?: number;
+  salary_amount?: number;  // monthly salary
+  daily_wage?: number;     // daily wage rate
+  bank_name?: string;
+  account_number?: string;
+  ifsc_code?: string;
+  upi_id?: string;
+  created_at: string;
+}
+
+export interface WorkerAttendance {
+  id: string;
+  worker_id: string;
+  worker_name?: string;
+  date: string;
+  shift?: 'AM' | 'PM' | 'full';
+  status: 'present' | 'absent';
+  created_at: string;
+}
+
+export interface WorkerSalarySummary {
+  worker_id: string;
+  worker_name: string;
+  monthly_salary: number;
+  daily_wage: number;
+  total_working_days: number;
+  present_days: number;
+  absent_days: number;
+  per_day_salary: number;
+  salary_deduction: number;
+  final_salary: number;
+}
 export interface Customer {
   id: string;
   name: string;
@@ -8,6 +56,12 @@ export interface Customer {
   default_rate?: number;
   cattle_feed_reduction?: number;
   gender?: 'male' | 'female';
+  vendor_id?: string;
+  customer_code?: string;
+  bank_name?: string;
+  account_number?: string;
+  ifsc_code?: string;
+  upi_id?: string;
   created_at: string;
 }
 
@@ -15,6 +69,10 @@ export interface MilkEntry {
   id: string;
   customer_id: string;
   customer_name: string;
+  worker_id?: string;
+  worker_name?: string;
+  fat?: number;
+  snf?: number;
   date: string;
   shift: 'AM' | 'PM';
   liters: number;
