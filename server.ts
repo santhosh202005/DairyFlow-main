@@ -281,11 +281,11 @@ async function startServer() {
 
   // ─── PWA / TWA ─────────────────────────────────────────────────────────────
   app.get("/.well-known/assetlinks.json", (_req, res) => {
-    const packageName = process.env.TWA_PACKAGE_NAME || "com.dairyflow.app";
+    const packageName = process.env.TWA_PACKAGE_NAME || "com.onrender.dairyflow_main.twa";
     const rawFingerprints = process.env.TWA_FINGERPRINTS || process.env.TWA_FINGERPRINT || "";
     const fingerprints = rawFingerprints
       ? rawFingerprints.split(",").map(fp => fp.trim()).filter(Boolean)
-      : ["YOUR_SHA256_FINGERPRINT_HERE"];
+      : ["BE:45:F7:B7:A8:01:74:40:5B:40:AD:FB:BB:E8:5A:30:65:95:C3:D8:95:8F:C7:AF:10:B2:89:89:CD:8C:BD:AF"];
 
     res.json([{
       relation: ["delegate_permission/common.handle_all_urls"],
