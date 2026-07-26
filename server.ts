@@ -283,9 +283,13 @@ async function startServer() {
   app.get("/.well-known/assetlinks.json", (_req, res) => {
     const packageName = process.env.TWA_PACKAGE_NAME || "com.onrender.dairyflow_main.twa";
     const rawFingerprints = process.env.TWA_FINGERPRINTS || process.env.TWA_FINGERPRINT || "";
+    const defaultFingerprints = [
+      "DA:EE:AD:B5:D1:4F:7F:4A:BE:84:7B:3C:DA:39:F3:E0:BA:09:09:79:EA:53:C5:FA:E5:6A:27:A9:11:3F:78:5C",
+      "BE:45:F7:B7:A8:01:74:40:5B:40:AD:FB:BB:E8:5A:30:65:95:C3:D8:95:8F:C7:AF:10:B2:89:89:CD:8C:BD:AF"
+    ];
     const fingerprints = rawFingerprints
       ? rawFingerprints.split(",").map(fp => fp.trim()).filter(Boolean)
-      : ["BE:45:F7:B7:A8:01:74:40:5B:40:AD:FB:BB:E8:5A:30:65:95:C3:D8:95:8F:C7:AF:10:B2:89:89:CD:8C:BD:AF"];
+      : defaultFingerprints;
 
     res.json([{
       relation: ["delegate_permission/common.handle_all_urls"],
