@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Plus, Trash2, Wallet, User, Calendar } from 'lucide-react';
+import { Plus, Trash2, Wallet, User, Calendar, IndianRupee, QrCode, CreditCard, Banknote } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Advance, Customer } from '../types';
 import { useTranslation } from '../i18n';
@@ -34,8 +34,11 @@ export default function Advances({ customerId, vendorId, isAdmin = true, isVendo
     pendingPayments: number;
   } | null>(null);
 
+  const [customerCredits, setCustomerCredits] = useState<any[]>([]);
+
   useEffect(() => {
     fetchAdvances();
+    fetchCustomerCredits();
     if (isAdmin || isVendor) {
       fetchCustomers();
       const statsUrl = vendorId ? `/api/stats?vendorId=${vendorId}` : '/api/stats';
@@ -48,6 +51,17 @@ export default function Advances({ customerId, vendorId, isAdmin = true, isVendo
         .then(data => setGlobalStats(data));
     }
   }, [customerId, vendorId, isAdmin, isVendor]);
+
+  const fetchCustomerCredits = () => {
+    let url = '/api/customer-credits';
+    if (customerId) url = `/api/customer-credits?customerId=${customerId}`;
+    const token = localStorage.getItem('dairy_auth_token');
+    const headers: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {};
+    fetch(url, { headers })
+      .then(res => res.ok ? res.json() : [])
+      .then(data => setCustomerCredits(data))
+      .catch(() => setCustomerCredits([]));
+  };
 
   useEffect(() => {
     if ((isAdmin || isVendor) && formData.customer_id) {
@@ -360,6 +374,56 @@ export default function Advances({ customerId, vendorId, isAdmin = true, isVendo
             </div>
           </motion.div>
         ))}
+      </div>
+
+      {/* Payout Credits & Payments Received */}
+      <div className="bg-white rounded-2xl md:rounded-[2rem] shadow-soft border border-slate-100 overflow-hidden mt-6">
+        <div className="px-5 py-4 bg-emerald-50/40 border-b border-emerald-100 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Wallet size={18} className="text-emerald-600" />
+            <h3 className="font-bold text-slate-800 text-sm md:text-base">{t('creditsReceived')} / {t('creditHistory')}</h3>
+          </div>
+          <span className="text-xs font-black text-emerald-700">
+            {t('paymentsReceived')}: ₹{customerCredits.reduce((s, c) => s + (c.amount || 0), 0).toFixed(0)}
+          </span>
+        </div>
+
+        {customerCredits.length === 0 ? (
+          <div className="p-8 text-center text-slate-400 italic text-sm">
+            {t('noCreditsYet')}
+          </div>
+        ) : (
+          <div className="divide-y divide-slate-50">
+            {customerCredits.map((credit, idx) => (
+              <div key={credit.id || idx} className="px-5 py-3.5 flex items-center justify-between hover:bg-slate-50/50 transition-colors border-l-4 border-emerald-500">
+                <div className="flex items-center gap-3">
+                  <div className="w-9 h-9 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center font-bold text-xs">
+                    <IndianRupee size={16} />
+                  </div>
+                  <div>
+                    <p className="font-bold text-slate-800 text-xs md:text-sm">
+                      {new Date(credit.date + 'T00:00:00').toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}
+                    </p>
+                    {credit.note && <p className="text-[10px] text-slate-400 font-medium">{credit.note}</p>}
+                  </div>
+                </div>
+
+                <div className="text-right">
+                  <p className="text-sm md:text-base font-black text-emerald-600">+₹{(credit.amount || 0).toLocaleString('en-IN')}</p>
+                  <div className="flex items-center justify-end gap-1 mt-0.5">
+                    {credit.payment_mode === 'upi' ? <QrCode size={12} className="text-emerald-600" /> : credit.payment_mode === 'bank_transfer' ? <CreditCard size={12} className="text-blue-600" /> : <Banknote size={12} className="text-amber-600" />}
+                    <span className="text-[9px] font-bold text-slate-500">
+                      {credit.payment_mode === 'upi' ? 'UPI' : credit.payment_mode === 'bank_transfer' ? 'Bank Transfer' : 'Cash'}
+                    </span>
+                  </div>
+                  {credit.reference_no && (
+                    <p className="text-[8px] text-slate-400 font-mono mt-0.5">Ref: {credit.reference_no}</p>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* New Transaction Modal */}

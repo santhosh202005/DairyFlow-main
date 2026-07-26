@@ -281,11 +281,19 @@ async function startServer() {
 
   // ─── PWA / TWA ─────────────────────────────────────────────────────────────
   app.get("/.well-known/assetlinks.json", (_req, res) => {
-    const packageName = process.env.TWA_PACKAGE_NAME || "com.yourname.dairyflow";
-    const fingerprint = process.env.TWA_FINGERPRINT || "YOUR_SHA256_FINGERPRINT_HERE";
+    const packageName = process.env.TWA_PACKAGE_NAME || "com.dairyflow.app";
+    const rawFingerprints = process.env.TWA_FINGERPRINTS || process.env.TWA_FINGERPRINT || "";
+    const fingerprints = rawFingerprints
+      ? rawFingerprints.split(",").map(fp => fp.trim()).filter(Boolean)
+      : ["YOUR_SHA256_FINGERPRINT_HERE"];
+
     res.json([{
       relation: ["delegate_permission/common.handle_all_urls"],
-      target: { namespace: "android_app", package_name: packageName, sha256_cert_fingerprints: [fingerprint] }
+      target: {
+        namespace: "android_app",
+        package_name: packageName,
+        sha256_cert_fingerprints: fingerprints
+      }
     }]);
   });
 
@@ -1255,6 +1263,29 @@ async function startServer() {
     }
   });
 
+  // ─── CUSTOMER CREDITS / PAYMENTS ─────────────────────────────────────────
+  app.get("/api/customer-credits", async (req, res) => {
+    let customerId = req.query.customerId as string;
+    const authHeader = req.headers.authorization;
+    if (!customerId && authHeader) {
+      const token = authHeader.replace("Bearer ", "").trim();
+      if (token.startsWith("customer-token-")) {
+        customerId = token.replace("customer-token-", "");
+      }
+    }
+    if (!customerId) return res.status(400).json({ success: false, message: "customerId is required" });
+    try {
+      const result = await db.execute({
+        sql: `SELECT * FROM payments WHERE recipient_type = 'customer' AND recipient_id = ? ORDER BY date DESC, created_at DESC`,
+        args: [customerId],
+      });
+      res.json(result.rows);
+    } catch (err) {
+      console.error(err);
+      res.status(500).json({ success: false, message: "Server error" });
+    }
+  });
+
   // ─── FEED TYPES ─────────────────────────────────────────────────────────────
   app.get("/api/feed-types", async (_req, res) => {
     const result = await db.execute("SELECT * FROM feed_types ORDER BY name ASC");
@@ -1513,12 +1544,13 @@ async function startServer() {
       : "SELECT date, shift, liters, amount FROM milk_entries WHERE customer_id = ? AND date LIKE ? ORDER BY date ASC, shift ASC";
     const milkArgs = worker_id ? [customerId, `${month}%`, worker_id] : [customerId, `${month}%`];
 
-    const [milkR, advR, feedR, borrR, repR] = await Promise.all([
+    const [milkR, advR, feedR, borrR, repR, payR] = await Promise.all([
       db.execute({ sql: milkSql, args: milkArgs }),
       db.execute({ sql: "SELECT date, amount, type FROM advances WHERE customer_id = ? AND date LIKE ? ORDER BY date ASC", args: [customerId, `${month}%`] }),
       db.execute({ sql: "SELECT p.date, p.quantity, p.amount, t.name as feed_name FROM feed_purchases p JOIN feed_types t ON p.feed_type_id = t.id WHERE p.customer_id = ? AND p.date LIKE ? ORDER BY p.date ASC", args: [customerId, `${month}%`] }),
       db.execute({ sql: "SELECT SUM(amount) as total FROM advances WHERE customer_id = ? AND type = 'advance'", args: [customerId] }),
       db.execute({ sql: "SELECT SUM(amount) as total FROM advances WHERE customer_id = ? AND type = 'deduction'", args: [customerId] }),
+      db.execute({ sql: "SELECT * FROM payments WHERE recipient_type = 'customer' AND recipient_id = ? AND date LIKE ? ORDER BY date DESC", args: [customerId, `${month}%`] }),
     ]);
 
     res.json({
@@ -1526,6 +1558,7 @@ async function startServer() {
       milkEntries: milkR.rows,
       advances: advR.rows,
       feedPurchases: feedR.rows,
+      payments: payR.rows,
       advanceBalance: ((borrR.rows[0]?.total as number) || 0) - ((repR.rows[0]?.total as number) || 0),
     });
   });

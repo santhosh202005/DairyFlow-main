@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { FileText, Download, Printer, Search, ArrowLeft, Calendar, Droplets, Wallet, Package, ChevronRight, Send } from 'lucide-react';
+import { FileText, Download, Printer, Search, ArrowLeft, Calendar, Droplets, Wallet, Package, ChevronRight, Send, IndianRupee, QrCode, CreditCard, Banknote } from 'lucide-react';
 import { BillingRecord } from '../types';
 import { motion } from 'motion/react';
 import SearchBar from './SearchBar';
@@ -76,6 +76,22 @@ export default function Billing({ customerId, isWorker = false, workerId }: Bill
         setDetailError(String(error.message || error));
         setDetailedData(null);
       });
+  };
+
+  const getPaymentModeIcon = (mode?: string) => {
+    switch (mode) {
+      case 'upi': return <QrCode size={13} className="text-emerald-600" />;
+      case 'bank_transfer': return <CreditCard size={13} className="text-blue-600" />;
+      default: return <Banknote size={13} className="text-amber-600" />;
+    }
+  };
+
+  const getPaymentModeLabel = (mode?: string) => {
+    switch (mode) {
+      case 'upi': return 'UPI';
+      case 'bank_transfer': return 'Bank Transfer';
+      default: return 'Cash';
+    }
   };
 
   const filteredBilling = billingData.filter(b => 
@@ -527,8 +543,57 @@ export default function Billing({ customerId, isWorker = false, workerId }: Bill
                           </td>
                         </tr>
                       ))}
-                      {detailedData.advances.length === 0 && (
-                        <tr><td colSpan={3} className="py-6 text-center text-slate-300 italic font-medium text-sm">{t('noTransactions')}</td></tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              {/* Customer Payout Credits Received */}
+              <div className="bg-white rounded-2xl md:rounded-[2rem] shadow-soft border border-slate-100 overflow-hidden col-span-1 lg:col-span-2">
+                <div className="px-4 md:px-8 py-4 md:py-6 bg-emerald-50/40 border-b border-emerald-100 flex items-center justify-between">
+                  <h4 className="text-xs md:text-sm font-black text-emerald-800 uppercase tracking-widest flex items-center gap-2">
+                    <Wallet size={14} className="text-emerald-600" />
+                    {t('creditsReceived')} / {t('creditHistory')}
+                  </h4>
+                  <span className="text-xs md:text-sm font-black text-emerald-700">
+                    {t('paymentsReceived')}: ₹{((detailedData.payments || []).reduce((acc: number, curr: any) => acc + curr.amount, 0)).toFixed(0)}
+                  </span>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left mobile-compact-table">
+                    <thead className="bg-white border-b border-slate-50">
+                      <tr>
+                        <th className="px-4 md:px-8 py-2.5 md:py-4 text-[10px] font-black text-slate-500 uppercase tracking-widest">{t('date')}</th>
+                        <th className="px-4 md:px-8 py-2.5 md:py-4 text-[10px] font-black text-slate-500 uppercase tracking-widest">{t('paymentMode')}</th>
+                        <th className="hidden sm:table-cell px-4 md:px-8 py-2.5 md:py-4 text-[10px] font-black text-slate-500 uppercase tracking-widest">{t('referenceNo')}</th>
+                        <th className="px-4 md:px-8 py-2.5 md:py-4 text-[10px] font-black text-slate-500 uppercase tracking-widest text-right">{t('amount')}</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-50">
+                      {(detailedData.payments || []).map((p: any, idx: number) => (
+                        <tr key={idx} className="hover:bg-slate-50 transition-colors border-l-4 border-emerald-500">
+                          <td className="px-4 md:px-8 py-2.5 md:py-4">
+                            <p className="text-[10px] md:text-xs font-bold text-slate-700">
+                              {new Date(p.date + 'T00:00:00').toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}
+                            </p>
+                            {p.note && <p className="text-[9px] text-slate-400 font-medium">{p.note}</p>}
+                          </td>
+                          <td className="px-4 md:px-8 py-2.5 md:py-4">
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-widest bg-emerald-50 text-emerald-700 border border-emerald-100">
+                              {getPaymentModeIcon(p.payment_mode)}
+                              {getPaymentModeLabel(p.payment_mode)}
+                            </span>
+                          </td>
+                          <td className="hidden sm:table-cell px-4 md:px-8 py-2.5 md:py-4 text-[10px] font-mono text-slate-500">
+                            {p.reference_no || '-'}
+                          </td>
+                          <td className="px-4 md:px-8 py-2.5 md:py-4 text-right text-xs md:text-sm font-display font-black text-emerald-600">
+                            + ₹{p.amount.toFixed(0)}
+                          </td>
+                        </tr>
+                      ))}
+                      {(!detailedData.payments || detailedData.payments.length === 0) && (
+                        <tr><td colSpan={4} className="py-6 text-center text-slate-300 italic font-medium text-sm">{t('noCreditsYet')}</td></tr>
                       )}
                     </tbody>
                   </table>
