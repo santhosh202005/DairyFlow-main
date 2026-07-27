@@ -4,6 +4,17 @@ import App from './App.tsx';
 import './index.css';
 import { LanguageProvider } from './i18n';
 
+// ── Capacitor Native API Base URL Interceptor ───────────────────────────
+const API_BASE_URL = 'https://dairyflow-main.onrender.com';
+const originalFetch = window.fetch;
+window.fetch = function (input: RequestInfo | URL, init?: RequestInit) {
+  let url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+  if (url.startsWith('/api/')) {
+    url = `${API_BASE_URL}${url}`;
+  }
+  return originalFetch(url, init);
+};
+
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <LanguageProvider>
