@@ -281,7 +281,8 @@ async function startServer() {
 
   // ─── PWA / TWA ─────────────────────────────────────────────────────────────
   app.get("/.well-known/assetlinks.json", (_req, res) => {
-    res.setHeader("Content-Type", "application/json");
+    res.setHeader("Content-Type", "application/json; charset=utf-8");
+    res.setHeader("Access-Control-Allow-Origin", "*");
     res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
 
     const playSigningKey = "DA:EE:AD:B5:D1:4F:7F:4A:BE:84:7B:3C:DA:39:F3:E0:BA:09:09:79:EA:53:C5:FA:E5:6A:27:A9:11:3F:78:5C";
