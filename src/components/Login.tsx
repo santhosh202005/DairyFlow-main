@@ -118,7 +118,8 @@ export default function Login({ onLogin }: LoginProps) {
     setError('');
     setMessage('');
     try {
-      const response = await fetch('/api/login', {
+      const loginUrl = loginType === 'vendor' ? '/api/vendor/login' : '/api/login';
+      const response = await fetch(loginUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ username, password }),
@@ -140,8 +141,9 @@ export default function Login({ onLogin }: LoginProps) {
         }
         setError(msg);
       }
-    } catch {
-      setError('Something went wrong. Please check your connection.');
+    } catch (err) {
+      console.error('[Login.tsx] handleLoginSubmit error:', err);
+      setError(`Something went wrong: ${err instanceof Error ? err.message : String(err)}. Please check your connection.`);
     } finally {
       setIsLoading(false);
     }
@@ -166,8 +168,9 @@ export default function Login({ onLogin }: LoginProps) {
       } else {
         setError(data.message || 'Failed to send OTP. Please make sure the number is registered.');
       }
-    } catch {
-      setError('Something went wrong. Please check your connection.');
+    } catch (err) {
+      console.error('[Login.tsx] handleRequestOtp error:', err);
+      setError(`Something went wrong: ${err instanceof Error ? err.message : String(err)}. Please check your connection.`);
     } finally {
       setIsLoading(false);
     }
@@ -193,8 +196,9 @@ export default function Login({ onLogin }: LoginProps) {
       } else {
         setError(data.message || 'Failed to reset password.');
       }
-    } catch {
-      setError('Something went wrong. Please check your connection.');
+    } catch (err) {
+      console.error('[Login.tsx] handleCustomerReset error:', err);
+      setError(`Something went wrong: ${err instanceof Error ? err.message : String(err)}. Please check your connection.`);
     } finally {
       setIsLoading(false);
     }
@@ -228,8 +232,9 @@ export default function Login({ onLogin }: LoginProps) {
       } else {
         setError(data.message || 'Failed to reset password.');
       }
-    } catch {
-      setError('Something went wrong. Please check your connection.');
+    } catch (err) {
+      console.error('[Login.tsx] handleDirectReset error:', err);
+      setError(`Something went wrong: ${err instanceof Error ? err.message : String(err)}. Please check your connection.`);
     } finally {
       setIsLoading(false);
     }
@@ -524,7 +529,12 @@ export default function Login({ onLogin }: LoginProps) {
                     className="w-full bg-emerald-600 text-white py-4 rounded-xl font-bold hover:bg-emerald-700 transition-all shadow-lg shadow-emerald-600/20 flex items-center justify-center gap-2 disabled:opacity-70">
                     {isLoading
                       ? <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                      : <><LogIn size={20} /> {loginType === 'admin' ? t('signInAsAdmin') : t('signInAsCustomer')}</>}
+                      : <><LogIn size={20} /> {
+                          loginType === 'admin' ? t('signInAsAdmin') :
+                          loginType === 'vendor' ? t('signInAsVendor') :
+                          loginType === 'worker' ? t('signInAsWorker') :
+                          t('signInAsCustomer')
+                        }</>}
                   </button>
                 </form>
               </motion.div>

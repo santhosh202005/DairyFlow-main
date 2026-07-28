@@ -254,6 +254,8 @@ const enParts: Record<string, string>[] = [
     enterCustomerUsername: 'Enter customer username',
     signInAsAdmin: 'Sign In as Admin',
     signInAsCustomer: 'Sign In as Customer',
+    signInAsVendor: 'Sign In as Vendor',
+    signInAsWorker: 'Sign In as Worker',
     // Advances
     financialLedger: 'Financial Ledger',
     advancesPayouts: 'Advances & Payouts',
@@ -576,6 +578,8 @@ const taParts: Record<string, string>[] = [
     enterCustomerUsername: 'வாடிக்கையாளர் பெயரை உள்ளிடவும்',
     signInAsAdmin: 'நிர்வாகியாக உள்நுழைக',
     signInAsCustomer: 'வாடிக்கையாளராக உள்நுழைக',
+    signInAsVendor: 'விற்பனையாளராக உள்நுழைக',
+    signInAsWorker: 'பணியாளராக உள்நுழைக',
     // Advances
     financialLedger: 'நிதி புத்தகம்',
     advancesPayouts: 'முன்பணம் மற்றும் கட்டணங்கள்',
@@ -800,6 +804,8 @@ const taParts: Record<string, string>[] = [
     enterCustomerUsername: 'வாடிக்கையாளர் பெயரை உள்ளிடவும்',
     signInAsAdmin: 'நிர்வாகியாக உள்நுழைக',
     signInAsCustomer: 'வாடிக்கையாளராக உள்நுழைக',
+    signInAsVendor: 'விற்பனையாளராக உள்நுழைக',
+    signInAsWorker: 'பணியாளராக உள்நுழைக',
     // Advances
     financialLedger: 'நிதி புத்தகம்',
     advancesPayouts: 'முன்பணம் மற்றும் கட்டணங்கள்',

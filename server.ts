@@ -266,6 +266,24 @@ async function startServer() {
   const PORT = parseInt(process.env.PORT || "3000");
   app.use(express.json({ limit: "10mb" }));
 
+  // CORS Middleware for web/PWA/Capacitor requests
+  app.use((req, res, next) => {
+    const origin = req.headers.origin;
+    if (origin) {
+      res.setHeader("Access-Control-Allow-Origin", origin);
+    } else {
+      res.setHeader("Access-Control-Allow-Origin", "*");
+    }
+    res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+    res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+    res.setHeader("Access-Control-Allow-Credentials", "true");
+
+    if (req.method === "OPTIONS") {
+      return res.sendStatus(200);
+    }
+    next();
+  });
+
   // ─── Health Check (keeps Render free tier alive) ───────────────────────────
   app.get("/api/health", (_req, res) => {
     res.json({ status: "ok", timestamp: new Date().toISOString() });
@@ -316,6 +334,38 @@ async function startServer() {
   });
 
   // ─── LOGIN ──────────────────────────────────────────────────────────────────
+  app.post("/api/vendor/login", async (req, res) => {
+    const { username: rawUsername, password } = req.body;
+    const username = rawUsername?.trim();
+
+    console.log(`[Vendor Login] Attempt for: "${username}"`);
+
+    try {
+      const vendorResult = await db.execute({
+        sql: "SELECT * FROM vendors WHERE username = ? COLLATE NOCASE AND password = ?",
+        args: [username, password],
+      });
+      const vendor = vendorResult.rows[0] as any;
+      if (vendor) {
+        console.log(`[Vendor Login] Vendor login successful: ${vendor.name}`);
+        return res.json({
+          success: true,
+          token: `vendor-token-${vendor.id}`,
+          role: "vendor",
+          vendorId: vendor.id,
+          vendorName: vendor.name,
+          vendorPhone: vendor.phone,
+          vendorAddress: vendor.address,
+          profilePicture: vendor.profile_picture || null,
+        });
+      }
+      return res.status(401).json({ success: false, message: "Invalid vendor credentials" });
+    } catch (dbError) {
+      console.error("[Vendor Login] Vendor DB error:", dbError);
+      return res.status(500).json({ success: false, message: "Internal server error" });
+    }
+  });
+
   app.post("/api/login", async (req, res) => {
     const { username: rawUsername, password } = req.body;
     const username = rawUsername?.trim();

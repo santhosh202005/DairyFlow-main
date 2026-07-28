@@ -8,11 +8,25 @@ import { LanguageProvider } from './i18n';
 const API_BASE_URL = 'https://dairyflow-main.onrender.com';
 const originalFetch = window.fetch;
 window.fetch = function (input: RequestInfo | URL, init?: RequestInit) {
-  let url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
-  if (url.startsWith('/api/')) {
-    url = `${API_BASE_URL}${url}`;
+  let url = typeof input === 'string' ? input : input instanceof URL ? input.href : (input as Request).url;
+  
+  const isLocalApi = url.startsWith('/api/') || 
+                     url.startsWith('http://localhost/api/') || 
+                     url.startsWith('https://localhost/api/') || 
+                     url.startsWith('capacitor://localhost/api/');
+
+  if (isLocalApi) {
+    const path = url.substring(url.indexOf('/api/'));
+    url = `${API_BASE_URL}${path}`;
   }
-  return originalFetch(url, init);
+
+  if (typeof input !== 'string' && !(input instanceof URL)) {
+    input = new Request(url, input);
+  } else {
+    input = url;
+  }
+  
+  return originalFetch(input, init);
 };
 
 createRoot(document.getElementById('root')!).render(
