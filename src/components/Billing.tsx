@@ -11,6 +11,7 @@ interface BillingProps {
   customerId?: string;
   isWorker?: boolean;
   workerId?: string;
+  isCustomer?: boolean;
 }
 
 const getAuthHeaders = (): Record<string, string> => {
@@ -18,7 +19,7 @@ const getAuthHeaders = (): Record<string, string> => {
   return token ? { Authorization: `Bearer ${token}` } : {};
 };
 
-export default function Billing({ customerId, isWorker = false, workerId }: BillingProps) {
+export default function Billing({ customerId, isWorker = false, workerId, isCustomer = false }: BillingProps) {
   const { t } = useTranslation();
   const [billingData, setBillingData] = useState<BillingRecord[]>([]);
   const [detailedData, setDetailedData] = useState<{
@@ -188,7 +189,7 @@ export default function Billing({ customerId, isWorker = false, workerId }: Bill
             >
               <Printer size={16} />
             </button>
-            {!isWorker && detailedData?.customer && (
+            {!isWorker && !isCustomer && detailedData?.customer && (
               <button
                 onClick={() => setShowPayModal(true)}
                 className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-lg md:rounded-xl transition-all flex items-center gap-1.5 shadow-sm touch-btn"
@@ -215,82 +216,110 @@ export default function Billing({ customerId, isWorker = false, workerId }: Bill
             </div>
           </div>
         ) : (
-          <div className="grid grid-cols-3 md:grid-cols-3 lg:grid-cols-6 gap-2 md:gap-4 md:gap-6">
-            <div className="bento-card bg-emerald-50/30 border-emerald-100 flex flex-col justify-between col-span-1">
-              <div className="flex flex-col gap-1 md:gap-3 text-emerald-600 mb-2 md:mb-6">
-                <div className="w-8 h-8 md:w-10 md:h-10 bg-emerald-600 text-white rounded-lg md:rounded-xl flex items-center justify-center shadow-lg shadow-emerald-100 shrink-0">
-                  <Droplets size={14} className="md:hidden" />
-                  <Droplets size={20} className="hidden md:block" />
+          <>
+            {/* Money Received Banner — shown only in customer portal when vendor has sent payment */}
+            {isCustomer && (detailedData as any).payments && (detailedData as any).payments.length > 0 && (() => {
+              const totalReceived = ((detailedData as any).payments as any[]).reduce((sum: number, p: any) => sum + p.amount, 0);
+              return (
+                <div className="flex items-start gap-3 bg-emerald-50 border border-emerald-200 rounded-2xl px-4 py-3 md:px-6 md:py-4 mb-2 shadow-sm">
+                  <div className="w-9 h-9 rounded-xl bg-emerald-500 flex items-center justify-center shrink-0 shadow-md shadow-emerald-100">
+                    <IndianRupee size={18} className="text-white" />
+                  </div>
+                  <div>
+                    <p className="text-sm font-black text-emerald-800">Money Received — ₹{totalReceived.toFixed(0)}</p>
+                    <p className="text-[11px] text-emerald-600 font-medium mt-0.5">
+                      Your vendor has sent this payment to your account or in cash. This amount is <span className="font-black">not</span> deducted from your advance balance.
+                    </p>
+                  </div>
                 </div>
-                <span className="text-[9px] md:text-[10px] font-black uppercase tracking-widest leading-tight text-emerald-700">{t('milkEarnings')}</span>
-              </div>
-              <p className="text-lg md:text-3xl font-display font-bold text-emerald-900 tracking-tight">₹{totalMilkAmount.toFixed(0)}</p>
-            </div>
+              );
+            })()}
 
-            <div className="bento-card border-blue-100 bg-white flex flex-col justify-between col-span-1">
-              <div className="flex flex-col gap-1 md:gap-3 text-blue-500 mb-2 md:mb-6">
-                <div className="w-8 h-8 md:w-10 md:h-10 bg-blue-500 text-white rounded-lg md:rounded-xl flex items-center justify-center shadow-lg shadow-blue-100 shrink-0">
-                  <Wallet size={14} className="md:hidden" />
-                  <Wallet size={20} className="hidden md:block" />
+            <div className="grid grid-cols-3 md:grid-cols-3 lg:grid-cols-6 gap-2 md:gap-4 md:gap-6">
+              <div className="bento-card bg-emerald-50/30 border-emerald-100 flex flex-col justify-between col-span-1">
+                <div className="flex flex-col gap-1 md:gap-3 text-emerald-600 mb-2 md:mb-6">
+                  <div className="w-8 h-8 md:w-10 md:h-10 bg-emerald-600 text-white rounded-lg md:rounded-xl flex items-center justify-center shadow-lg shadow-emerald-100 shrink-0">
+                    <Droplets size={14} className="md:hidden" />
+                    <Droplets size={20} className="hidden md:block" />
+                  </div>
+                  <span className="text-[9px] md:text-[10px] font-black uppercase tracking-widest leading-tight text-emerald-700">{t('milkEarnings')}</span>
                 </div>
-                <span className="text-[9px] md:text-[10px] font-black uppercase tracking-widest leading-tight text-slate-500">{t('cashAdvances')}</span>
+                <p className="text-lg md:text-3xl font-display font-bold text-emerald-900 tracking-tight">₹{totalMilkAmount.toFixed(0)}</p>
               </div>
-              <div>
-                <p className="text-lg md:text-3xl font-display font-bold text-blue-600 tracking-tight">₹{totalCashAdvances.toFixed(0)}</p>
-                <p className="text-[8px] text-blue-400 mt-1 uppercase font-black tracking-widest hidden md:block">{t('informational')}</p>
-              </div>
-            </div>
 
-            <div className="bento-card border-rose-100 bg-white flex flex-col justify-between col-span-1">
-              <div className="flex flex-col gap-1 md:gap-3 text-rose-500 mb-2 md:mb-6">
-                <div className="w-8 h-8 md:w-10 md:h-10 bg-rose-500 text-white rounded-lg md:rounded-xl flex items-center justify-center shadow-lg shadow-rose-100 shrink-0">
-                  <Wallet size={14} className="md:hidden" />
-                  <Wallet size={20} className="hidden md:block" />
+              <div className="bento-card border-blue-100 bg-white flex flex-col justify-between col-span-1">
+                <div className="flex flex-col gap-1 md:gap-3 text-blue-500 mb-2 md:mb-6">
+                  <div className="w-8 h-8 md:w-10 md:h-10 bg-blue-500 text-white rounded-lg md:rounded-xl flex items-center justify-center shadow-lg shadow-blue-100 shrink-0">
+                    <Wallet size={14} className="md:hidden" />
+                    <Wallet size={20} className="hidden md:block" />
+                  </div>
+                  <span className="text-[9px] md:text-[10px] font-black uppercase tracking-widest leading-tight text-slate-500">{t('cashAdvances')}</span>
                 </div>
-                <span className="text-[9px] md:text-[10px] font-black uppercase tracking-widest leading-tight text-slate-500">{t('billReduction')}</span>
+                <div>
+                  <p className="text-lg md:text-3xl font-display font-bold text-blue-600 tracking-tight">₹{totalCashAdvances.toFixed(0)}</p>
+                  <p className="text-[8px] text-blue-400 mt-1 uppercase font-black tracking-widest hidden md:block">{t('informational')}</p>
+                </div>
               </div>
-              <div>
-                <p className="text-lg md:text-3xl font-display font-bold text-rose-600 tracking-tight">₹{cattleFeedReduction.toFixed(0)}</p>
-                <p className="text-[8px] text-rose-400 mt-1 uppercase font-black tracking-widest hidden md:block">{t('subtracted')}</p>
-              </div>
-            </div>
 
-            <div className="bento-card border-orange-100 bg-white flex flex-col justify-between col-span-1">
-              <div className="flex flex-col gap-1 md:gap-3 text-orange-500 mb-2 md:mb-6">
-                <div className="w-8 h-8 md:w-10 md:h-10 bg-orange-500 text-white rounded-lg md:rounded-xl flex items-center justify-center shadow-lg shadow-orange-100 shrink-0">
-                  <Package size={14} className="md:hidden" />
-                  <Package size={20} className="hidden md:block" />
+              <div className="bento-card border-rose-100 bg-white flex flex-col justify-between col-span-1">
+                <div className="flex flex-col gap-1 md:gap-3 text-rose-500 mb-2 md:mb-6">
+                  <div className="w-8 h-8 md:w-10 md:h-10 bg-rose-500 text-white rounded-lg md:rounded-xl flex items-center justify-center shadow-lg shadow-rose-100 shrink-0">
+                    <Wallet size={14} className="md:hidden" />
+                    <Wallet size={20} className="hidden md:block" />
+                  </div>
+                  <span className="text-[9px] md:text-[10px] font-black uppercase tracking-widest leading-tight text-slate-500">{t('billReduction')}</span>
                 </div>
-                <span className="text-[9px] md:text-[10px] font-black uppercase tracking-widest leading-tight text-slate-500">{t('feedExpenses')}</span>
+                <div>
+                  <p className="text-lg md:text-3xl font-display font-bold text-rose-600 tracking-tight">₹{cattleFeedReduction.toFixed(0)}</p>
+                  <p className="text-[8px] text-rose-400 mt-1 uppercase font-black tracking-widest hidden md:block">{t('subtracted')}</p>
+                </div>
               </div>
-              <div>
-                <p className="text-lg md:text-3xl font-display font-bold text-orange-600 tracking-tight">₹{totalFeedAmount.toFixed(0)}</p>
-                <p className="text-[8px] text-orange-400 mt-1 uppercase font-black tracking-widest hidden md:block">{t('infoOnly')}</p>
-              </div>
-            </div>
 
-            <div className="bento-card border-rose-100 bg-rose-50/20 flex flex-col justify-between col-span-1">
-              <div className="flex flex-col gap-1 md:gap-3 text-rose-500 mb-2 md:mb-6">
-                <div className="w-8 h-8 md:w-10 md:h-10 bg-rose-500 text-white rounded-lg md:rounded-xl flex items-center justify-center shadow-lg shadow-rose-100 shrink-0">
-                  <Package size={14} className="md:hidden" />
-                  <Package size={20} className="hidden md:block" />
+              <div className="bento-card border-orange-100 bg-white flex flex-col justify-between col-span-1">
+                <div className="flex flex-col gap-1 md:gap-3 text-orange-500 mb-2 md:mb-6">
+                  <div className="w-8 h-8 md:w-10 md:h-10 bg-orange-500 text-white rounded-lg md:rounded-xl flex items-center justify-center shadow-lg shadow-orange-100 shrink-0">
+                    <Package size={14} className="md:hidden" />
+                    <Package size={20} className="hidden md:block" />
+                  </div>
+                  <span className="text-[9px] md:text-[10px] font-black uppercase tracking-widest leading-tight text-slate-500">{t('feedExpenses')}</span>
                 </div>
-                <span className="text-[9px] md:text-[10px] font-black uppercase tracking-widest leading-tight text-rose-700">{t('totalDebt')}</span>
+                <div>
+                  <p className="text-lg md:text-3xl font-display font-bold text-orange-600 tracking-tight">₹{totalFeedAmount.toFixed(0)}</p>
+                  <p className="text-[8px] text-orange-400 mt-1 uppercase font-black tracking-widest hidden md:block">{t('infoOnly')}</p>
+                </div>
               </div>
-              <p className="text-lg md:text-3xl font-display font-bold text-rose-600 tracking-tight">₹{((detailedData as any).advanceBalance || 0).toFixed(0)}</p>
-            </div>
 
-            <div className="bento-card bg-slate-900 text-white shadow-xl flex flex-col justify-between col-span-1">
-              <div className="flex flex-col gap-1 md:gap-3 text-slate-400 mb-2 md:mb-6">
-                <div className="w-8 h-8 md:w-10 md:h-10 bg-white/10 text-white rounded-lg md:rounded-xl flex items-center justify-center shadow-lg shrink-0">
-                  <FileText size={14} className="md:hidden" />
-                  <FileText size={20} className="hidden md:block" />
+              {/* Advance Remaining Balance card — shows total advances given minus all deductions made (all-time outstanding) */}
+              <div className="bento-card border-rose-100 bg-rose-50/20 flex flex-col justify-between col-span-1">
+                <div className="flex flex-col gap-1 md:gap-3 text-rose-500 mb-2 md:mb-6">
+                  <div className="w-8 h-8 md:w-10 md:h-10 bg-rose-500 text-white rounded-lg md:rounded-xl flex items-center justify-center shadow-lg shadow-rose-100 shrink-0">
+                    <Package size={14} className="md:hidden" />
+                    <Package size={20} className="hidden md:block" />
+                  </div>
+                  <span className="text-[9px] md:text-[10px] font-black uppercase tracking-widest leading-tight text-rose-700">
+                    {isCustomer ? 'Advance Due' : t('totalDebt')}
+                  </span>
                 </div>
-                <span className="text-[9px] md:text-[10px] font-black uppercase tracking-widest leading-tight text-slate-300">{t('netPayout')}</span>
+                <div>
+                  <p className="text-lg md:text-3xl font-display font-bold text-rose-600 tracking-tight">₹{((detailedData as any).advanceBalance || 0).toFixed(0)}</p>
+                  {isCustomer && (
+                    <p className="text-[8px] text-rose-400 mt-1 uppercase font-black tracking-widest hidden md:block">After this month's deductions</p>
+                  )}
+                </div>
               </div>
-              <p className="text-xl md:text-4xl font-display font-bold tracking-tight text-emerald-400">₹{finalPayable.toFixed(0)}</p>
+
+              <div className="bento-card bg-slate-900 text-white shadow-xl flex flex-col justify-between col-span-1">
+                <div className="flex flex-col gap-1 md:gap-3 text-slate-400 mb-2 md:mb-6">
+                  <div className="w-8 h-8 md:w-10 md:h-10 bg-white/10 text-white rounded-lg md:rounded-xl flex items-center justify-center shadow-lg shrink-0">
+                    <FileText size={14} className="md:hidden" />
+                    <FileText size={20} className="hidden md:block" />
+                  </div>
+                  <span className="text-[9px] md:text-[10px] font-black uppercase tracking-widest leading-tight text-slate-300">{t('netPayout')}</span>
+                </div>
+                <p className="text-xl md:text-4xl font-display font-bold tracking-tight text-emerald-400">₹{finalPayable.toFixed(0)}</p>
+              </div>
             </div>
-          </div>
+          </>
         )}
 
         {/* Statement Detail */}

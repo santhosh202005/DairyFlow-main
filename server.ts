@@ -263,7 +263,12 @@ async function startServer() {
   await initDB();
 
   const app = express();
-  const PORT = parseInt(process.env.PORT || "3000");
+  const defaultPort = 3000;
+  const requestedPort = process.env.PORT ? parseInt(process.env.PORT, 10) : defaultPort;
+  const PORT = Number.isInteger(requestedPort) ? requestedPort : defaultPort;
+  const explicitPort = !!process.env.PORT;
+  let currentPort = PORT;
+  const maxPortRetries = 5;
   app.use(express.json({ limit: "10mb" }));
 
   // CORS Middleware for web/PWA/Capacitor requests
@@ -1312,10 +1317,9 @@ async function startServer() {
         args: [recipient_type, recipient_id, amount, payment_mode, reference_no || null, date, note || null],
       });
       if (recipient_type === 'customer') {
-        await db.execute({
-          sql: "INSERT INTO advances (customer_id, date, amount, type) VALUES (?, ?, ?, 'deduction')",
-          args: [recipient_id, date, amount],
-        });
+        // NOTE: billing payments are recorded in the payments table only.
+        // They do NOT affect the advance balance — advances are separate pre-payments
+        // given to customers, and their deductions are managed independently.
       }
       if (recipient_type === 'worker') {
         // Record salary credit in worker's account
@@ -1648,22 +1652,66 @@ async function startServer() {
     });
   }
 
-  const server = app.listen(PORT, "0.0.0.0", () => {
-    console.log(`✅ Server running on http://localhost:${PORT}`);
-    const adminPass = (process.env.ADMIN_PASSWORD || "admin123").trim();
-    if (adminPass === "admin123") {
-      console.log("⚠️  WARNING: Using default credentials! Change ADMIN_PASSWORD in env vars.");
-    }
-  });
+  const listenToPort = (port: number) => {
+    return new Promise<any>((resolve, reject) => {
+      const candidate = app.listen(port, "0.0.0.0");
+      const onError = (err: any) => {
+        candidate.off("listening", onListening);
+        candidate.off("error", onError);
+        reject(err);
+      };
+      const onListening = () => {
+        candidate.off("listening", onListening);
+        candidate.off("error", onError);
+        resolve(candidate);
+      };
+      candidate.once("error", onError);
+      candidate.once("listening", onListening);
+    });
+  };
 
-  server.on('error', (error: any) => {
-    if (error?.code === 'EADDRINUSE') {
-      console.error(`❌ Port ${PORT} is already in use. Set a different PORT or stop the process using that port.`);
-      if (process.env.PORT) {
-        console.error(`   Current PORT environment variable: ${process.env.PORT}`);
+  let server;
+  let attemptedPort = currentPort;
+
+  for (let attempt = 0; attempt <= maxPortRetries; attempt += 1) {
+    try {
+      server = await listenToPort(attemptedPort);
+      break;
+    } catch (error: any) {
+      if (error?.code === 'EADDRINUSE') {
+        if (explicitPort || attempt === 0) {
+          console.error(`❌ Port ${attemptedPort} is already in use.`);
+        }
+        if (attempt === maxPortRetries) {
+          console.error(`❌ Unable to bind to a port after ${maxPortRetries + 1} attempts.`);
+          if (process.env.PORT) {
+            console.error(`   Current PORT environment variable: ${process.env.PORT}`);
+          }
+          process.exit(1);
+        }
+        attemptedPort += 1;
+        console.log(`🔁 Trying next available port: ${attemptedPort}`);
+        continue;
       }
+      console.error('Server error:', error);
       process.exit(1);
     }
+  }
+
+  if (!server) {
+    console.error('❌ Failed to start server.');
+    process.exit(1);
+  }
+
+  const address = server.address();
+  const listenPort = typeof address === 'object' && address ? address.port : attemptedPort;
+  console.log(`✅ Server running on http://localhost:${listenPort}`);
+  const adminPass = (process.env.ADMIN_PASSWORD || "admin123").trim();
+  if (adminPass === "admin123") {
+    console.log("⚠️  WARNING: Using default credentials! Change ADMIN_PASSWORD in env vars.");
+  }
+
+  server.on('error', (error: any) => {
     console.error('Server error:', error);
     process.exit(1);
   });

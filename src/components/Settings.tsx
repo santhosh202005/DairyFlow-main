@@ -287,6 +287,7 @@ export default function Settings({ authData, onLogout, onProfileUpdate }: Settin
                 customerId={authData.customerId} 
                 isWorker={authData.role === 'worker'}
                 workerId={authData.workerId}
+                isCustomer={authData.role === 'customer'}
               />
             </motion.div>
           )}
