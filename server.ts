@@ -257,6 +257,38 @@ async function initDB() {
       await db.sync();
     } catch (_) {}
   }
+
+  // ─── DATA FIX: Remove advance deductions wrongly created by billing payments ─
+  // Previously, when vendor clicked "Pay Farmer", it incorrectly inserted a
+  // type='deduction' record into the advances table. This mixes billing payments
+  // with advance deductions. This migration removes those wrong records.
+  try {
+    const badDeductions = await db.execute(`
+      SELECT a.id
+      FROM advances a
+      WHERE a.type = 'deduction'
+        AND EXISTS (
+          SELECT 1 FROM payments p
+          WHERE p.recipient_type = 'customer'
+            AND p.recipient_id = a.customer_id
+            AND p.date = a.date
+            AND p.amount = a.amount
+        )
+    `);
+    if (badDeductions.rows.length > 0) {
+      console.log(`[Migration] Removing ${badDeductions.rows.length} advance deduction(s) wrongly created by billing payments...`);
+      for (const row of badDeductions.rows) {
+        await db.execute({ sql: "DELETE FROM advances WHERE id = ?", args: [row.id as any] });
+      }
+      console.log("[Migration] ✅ Billing payment deductions cleaned up from advances table.");
+      // Sync after cleanup if remote
+      if (isRemote && typeof db.sync === "function") {
+        try { await db.sync(); } catch (_) {}
+      }
+    }
+  } catch (err) {
+    console.log("[Migration] Payment deduction cleanup notice:", err);
+  }
 }
 
 async function startServer() {
