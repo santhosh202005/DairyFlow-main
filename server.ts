@@ -472,12 +472,15 @@ async function startServer() {
 
     // Check customer login
     try {
+      const cleanUsername = (username || "").trim();
+      const cleanPassword = (password || "").trim();
       const result = await db.execute({
         sql: `SELECT c.*, v.name as vendor_name, v.phone as vendor_phone, v.address as vendor_address
               FROM customers c
               LEFT JOIN vendors v ON c.vendor_id = v.id
-              WHERE c.username = ? COLLATE NOCASE AND c.password = ?`,
-        args: [username, password],
+              WHERE (c.username = ? COLLATE NOCASE OR c.phone = ? OR c.customer_code = ? COLLATE NOCASE)
+                AND (c.password = ? OR c.password = ?) AND c.password IS NOT NULL AND c.password != ''`,
+        args: [cleanUsername, cleanUsername, cleanUsername, password, cleanPassword],
       });
       const customer = result.rows[0];
       if (customer) {
@@ -954,11 +957,13 @@ async function startServer() {
 
   app.post("/api/customers", async (req, res) => {
     const { name, phone, address, username, password, default_rate = 30, cattle_feed_reduction = 0, gender = 'male', vendor_id, bank_name, account_number, ifsc_code, upi_id } = req.body;
+    const cleanUsername = username ? String(username).trim() : null;
+    const cleanPassword = password ? String(password).trim() : null;
     const customer_code = await generateCustomerCode();
     try {
       const result = await db.execute({
         sql: "INSERT INTO customers (name, phone, address, username, password, default_rate, cattle_feed_reduction, gender, vendor_id, customer_code, bank_name, account_number, ifsc_code, upi_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        args: [name, phone, address, username || null, password || null, default_rate, cattle_feed_reduction, gender, vendor_id || null, customer_code, bank_name || null, account_number || null, ifsc_code || null, upi_id || null],
+        args: [name, phone, address, cleanUsername, cleanPassword, default_rate, cattle_feed_reduction, gender, vendor_id || null, customer_code, bank_name || null, account_number || null, ifsc_code || null, upi_id || null],
       });
       res.json({ id: result.lastInsertRowid !== undefined ? Number(result.lastInsertRowid) : null, customer_code });
     } catch (err: any) {
@@ -971,9 +976,11 @@ async function startServer() {
 
   app.put("/api/customers/:id", async (req, res) => {
     const { name, phone, address, username, password, default_rate = 30, cattle_feed_reduction = 0, gender = 'male', bank_name, account_number, ifsc_code, upi_id } = req.body;
+    const cleanUsername = username ? String(username).trim() : null;
+    const cleanPassword = password ? String(password).trim() : null;
     await db.execute({
       sql: "UPDATE customers SET name = ?, phone = ?, address = ?, username = ?, password = ?, default_rate = ?, cattle_feed_reduction = ?, gender = ?, bank_name = ?, account_number = ?, ifsc_code = ?, upi_id = ? WHERE id = ?",
-      args: [name, phone, address, username || null, password || null, default_rate, cattle_feed_reduction, gender, bank_name || null, account_number || null, ifsc_code || null, upi_id || null, req.params.id],
+      args: [name, phone, address, cleanUsername, cleanPassword, default_rate, cattle_feed_reduction, gender, bank_name || null, account_number || null, ifsc_code || null, upi_id || null, req.params.id],
     });
     res.json({ success: true });
   });
