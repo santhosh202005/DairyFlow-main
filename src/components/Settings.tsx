@@ -69,7 +69,7 @@ export default function Settings({ authData, onLogout, onProfileUpdate }: Settin
           </div>
         </div>
 
-        <nav className="flex flex-row lg:flex-col overflow-x-auto lg:overflow-visible gap-1.5 pb-2 lg:pb-0 scrollbar-none">
+        <nav className="flex flex-row lg:flex-col flex-wrap gap-1.5 pb-2 lg:pb-0 scrollbar-none">
           {tabs.map((tab) => {
             const Icon = tab.icon;
             const isActive = activeTab === tab.id;
@@ -86,7 +86,7 @@ export default function Settings({ authData, onLogout, onProfileUpdate }: Settin
                   }
 
                 }}
-                className={`flex items-center gap-3 px-4 py-3.5 rounded-2xl font-bold text-sm transition-all whitespace-nowrap lg:w-full relative group cursor-pointer ${
+                className={`flex items-center gap-3 px-4 py-3.5 rounded-2xl font-bold text-sm transition-all lg:w-full relative group cursor-pointer ${
                   tab.id === 'logout' && !isActive
                     ? 'text-rose-500 hover:bg-rose-50/60'
                     : isActive

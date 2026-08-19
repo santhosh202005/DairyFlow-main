@@ -1,12 +1,37 @@
 import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import path from 'path';
+import net from 'net';
 import {defineConfig, loadEnv} from 'vite';
 
-export default defineConfig(({mode}) => {
+const checkPortAvailable = (port: number) => new Promise<boolean>((resolve) => {
+  const server = net.createServer();
+  server.unref();
+  server.on('error', () => resolve(false));
+  server.once('listening', () => {
+    server.close(() => resolve(true));
+  });
+  server.listen(port, '127.0.0.1');
+});
+
+const findAvailablePort = async (startingPort: number, maxChecks = 10) => {
+  for (let port = startingPort; port < startingPort + maxChecks; port += 1) {
+    if (await checkPortAvailable(port)) {
+      return port;
+    }
+  }
+  return startingPort;
+};
+
+export default defineConfig(async ({mode}) => {
   const env = loadEnv(mode, '.', '');
   const disableHmr = process.env.DISABLE_HMR === 'true' || env.DISABLE_HMR === 'true';
-  const hmrPort = parseInt(process.env.VITE_HMR_PORT || env.VITE_HMR_PORT || '24678', 10);
+  const requestedHmrPort = parseInt(process.env.VITE_HMR_PORT || env.VITE_HMR_PORT || '24678', 10);
+  const hmrPort = disableHmr ? undefined : await findAvailablePort(requestedHmrPort);
+
+  if (!disableHmr && hmrPort !== requestedHmrPort) {
+    console.log(`⚠️ HMR port ${requestedHmrPort} was busy; using ${hmrPort} instead.`);
+  }
 
   return {
     plugins: [react(), tailwindcss()],

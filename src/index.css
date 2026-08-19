@@ -45,6 +45,15 @@
     scroll-behavior: smooth;
   }
 
+  /* Enforce single-axis vertical scrolling on mobile and lock viewport width */
+  html, body, #root {
+    max-width: 100vw;
+    overflow-x: hidden !important;
+    touch-action: pan-y;
+    overscroll-behavior-x: none;
+    -webkit-overflow-scrolling: touch;
+  }
+
   /* ── Font Utility Classes ─────────────────────────────────────────────────── */
   /* font-brand   → Outfit  (DairyFlow logo / brand moments)                   */
   .font-brand {

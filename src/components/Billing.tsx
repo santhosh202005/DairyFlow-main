@@ -27,6 +27,8 @@ export default function Billing({ customerId, isWorker = false, workerId, isCust
     milkEntries: any[];
     advances: any[];
     feedPurchases: any[];
+    payments?: any[];
+    advanceBalance?: number;
   } | null>(null);
   const [detailError, setDetailError] = useState<string | null>(null);
   const [showPayModal, setShowPayModal] = useState(false);

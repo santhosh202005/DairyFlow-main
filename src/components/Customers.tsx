@@ -19,6 +19,7 @@ const getAuthHeaders = (): Record<string, string> => {
 
 export default function Customers({ vendorId, isVendor, readOnly = false }: CustomersProps) {
   const [customers, setCustomers] = useState<Customer[]>([]);
+  const [vendorOverview, setVendorOverview] = useState<any[] | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [historyCustomerId, setHistoryCustomerId] = useState<string | null>(null);
   const [editingCustomer, setEditingCustomer] = useState<Customer | null>(null);
@@ -40,8 +41,18 @@ export default function Customers({ vendorId, isVendor, readOnly = false }: Cust
   });
 
   useEffect(() => {
-    fetchCustomers();
-  }, [vendorId]);
+    if (readOnly) {
+      // Admin: fetch vendor overview (counts per vendor)
+      fetch('/api/admin/overview', { headers: getAuthHeaders() })
+        .then(res => res.json())
+        .then((data) => {
+          setVendorOverview(data.vendors || []);
+        })
+        .catch(() => setVendorOverview([]));
+    } else {
+      fetchCustomers();
+    }
+  }, [vendorId, readOnly]);
 
   const fetchCustomers = () => {
     const url = vendorId ? `/api/customers?vendorId=${vendorId}` : '/api/customers';
@@ -82,6 +93,11 @@ export default function Customers({ vendorId, isVendor, readOnly = false }: Cust
     c.phone.includes(debouncedSearch)
   );
 
+  const filteredVendors = (vendorOverview || []).filter((v: any) =>
+    v.name.toLowerCase().includes(debouncedSearch.toLowerCase()) ||
+    String(v.username || '').toLowerCase().includes(debouncedSearch.toLowerCase())
+  );
+
   return (
     <div className="space-y-4 md:space-y-6">
       {/* Search + Add */}
@@ -114,166 +130,197 @@ export default function Customers({ vendorId, isVendor, readOnly = false }: Cust
         )}
       </div>
 
-      {/* Desktop/tablet table */}
-      <div className="bg-white rounded-2xl shadow-soft border border-slate-100 overflow-hidden hidden sm:block">
-        <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse mobile-compact-table">
-            <thead>
-              <tr className="bg-slate-50 border-b border-slate-100">
-                <th className="p-3 md:p-4 font-semibold text-slate-600 text-[11px] md:text-sm uppercase tracking-wider">Name</th>
-                <th className="hidden md:table-cell p-3 md:p-4 font-semibold text-slate-600 text-[11px] md:text-sm uppercase tracking-wider">Phone</th>
-                <th className="hidden lg:table-cell p-3 md:p-4 font-semibold text-slate-600 text-[11px] md:text-sm uppercase tracking-wider">Rate</th>
-                <th className="p-3 md:p-4 font-semibold text-slate-600 text-[11px] md:text-sm uppercase tracking-wider text-right">Actions</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {filteredCustomers.map((customer) => (
-                <tr key={customer.id} className="hover:bg-slate-50 transition-colors group">
-                  <td className="p-3 md:p-4 font-medium text-slate-900 text-sm leading-tight">
-                    <div>
-                      <p className="font-bold text-slate-900">{customer.name}</p>
-                      <p className="text-xs text-slate-400 md:hidden mt-0.5">{customer.phone}</p>
-                    </div>
-                  </td>
-                  <td className="hidden md:table-cell p-3 md:p-4 text-slate-600 text-sm">{customer.phone}</td>
-                  <td className="hidden lg:table-cell p-3 md:p-4 text-slate-600 text-sm">₹{customer.default_rate || 30}/L</td>
-                  <td className="p-3 md:p-4 text-right">
-                    <div className="flex items-center justify-end gap-1">
-                      <button
-                        onClick={() => setHistoryCustomerId(customer.id)}
-                        className="p-2 text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors touch-btn"
-                        title="View Milk History"
-                      >
-                        <Milk size={15} />
-                      </button>
-                      {!readOnly && (
-                        <>
-                          <button
-                            onClick={() => {
-                              setEditingCustomer(customer);
-                              setFormData({ 
-                                name: customer.name, 
-                                phone: customer.phone, 
-                                address: customer.address,
-                                username: customer.username || '',
-                                password: customer.password || '',
-                                default_rate: customer.default_rate || 30,
-                                gender: customer.gender || 'male',
-                                bank_name: customer.bank_name || '',
-                                account_number: customer.account_number || '',
-                                ifsc_code: customer.ifsc_code || '',
-                                upi_id: customer.upi_id || '',
-                              });
-                              setIsModalOpen(true);
-                            }}
-                            className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors touch-btn"
-                          >
-                            <Edit2 size={15} />
-                          </button>
-                          <button
-                            onClick={() => handleDelete(customer.id)}
-                            className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors touch-btn"
-                          >
-                            <Trash2 size={15} />
-                          </button>
-                        </>
-                      )}
-                    </div>
-                  </td>
-                </tr>
-              ))}
-              {filteredCustomers.length === 0 && (
-                <tr>
-                  <td colSpan={4} className="p-8 md:p-12 text-center text-slate-400 italic text-sm">
-                    No customers found.
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      {/* Mobile card list */}
-      <div className="sm:hidden space-y-2.5">
-        {filteredCustomers.length === 0 && (
-          <div className="bg-white rounded-2xl border border-slate-100 p-8 text-center">
-            <div className="w-12 h-12 rounded-xl bg-slate-50 flex items-center justify-center text-slate-200 mx-auto mb-3">
-              <User size={24} />
+      {/* If admin (readOnly) show vendor-wise farmer counts, else show customers list */}
+      {readOnly ? (
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+          {(filteredVendors.length === 0) ? (
+            <div className="bg-white rounded-2xl border border-slate-100 p-8 text-center col-span-full">
+              <div className="w-12 h-12 rounded-xl bg-slate-50 flex items-center justify-center text-slate-200 mx-auto mb-3">
+                <User size={24} />
+              </div>
+              <p className="text-sm font-bold text-slate-400">No vendors found.</p>
             </div>
-            <p className="text-sm font-bold text-slate-400">No Customers</p>
-            <p className="text-xs text-slate-300 mt-1">Tap "Add Customer" to register a farmer.</p>
-          </div>
-        )}
-        {filteredCustomers.map((customer) => (
-          <motion.div
-            key={customer.id}
-            initial={{ opacity: 0, y: 6 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="bg-white rounded-xl border border-slate-100 p-4 shadow-soft"
-          >
-            <div className="flex items-start justify-between gap-3">
-              <div className="flex items-center gap-3 flex-1 min-w-0">
-                <div className="w-10 h-10 rounded-xl bg-emerald-50 flex items-center justify-center text-emerald-600 font-black text-sm flex-shrink-0">
-                  {customer.name.charAt(0).toUpperCase()}
-                </div>
-                <div className="min-w-0">
-                  <p className="font-bold text-slate-900 text-sm truncate">{customer.name}</p>
-                  <div className="flex items-center gap-3 mt-0.5">
-                    {customer.phone && (
-                      <span className="text-[11px] text-slate-400 flex items-center gap-1">
-                        <Phone size={10} />
-                        {customer.phone}
-                      </span>
-                    )}
-                    <span className="text-[11px] text-emerald-600 font-bold">₹{customer.default_rate || 30}/L</span>
+          ) : (
+            filteredVendors.map((v: any) => (
+              <div key={v.id} className="bg-white rounded-2xl border border-slate-100 p-4 shadow-soft">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h3 className="font-bold text-slate-900">{v.name}</h3>
+                    <p className="text-xs text-slate-500">@{v.username}</p>
+                  </div>
+                  <div className="text-center">
+                    <p className="text-2xl font-bold text-slate-900">{v.customer_count}</p>
+                    <p className="text-xs text-slate-500">Farmers</p>
                   </div>
                 </div>
               </div>
-              <div className="flex items-center gap-1 flex-shrink-0">
-                <button
-                  onClick={() => setHistoryCustomerId(customer.id)}
-                  className="p-2 text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors touch-btn"
-                >
-                  <Milk size={16} />
-                </button>
-                {!readOnly && (
-                  <>
-                    <button
-                      onClick={() => {
-                        setEditingCustomer(customer);
-                        setFormData({ 
-                          name: customer.name, 
-                          phone: customer.phone, 
-                          address: customer.address,
-                          username: customer.username || '',
-                          password: customer.password || '',
-                          default_rate: customer.default_rate || 30,
-                          gender: customer.gender || 'male',
-                          bank_name: customer.bank_name || '',
-                          account_number: customer.account_number || '',
-                          ifsc_code: customer.ifsc_code || '',
-                          upi_id: customer.upi_id || '',
-                        });
-                        setIsModalOpen(true);
-                      }}
-                      className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors touch-btn"
-                    >
-                      <Edit2 size={16} />
-                    </button>
-                    <button
-                      onClick={() => handleDelete(customer.id)}
-                      className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors touch-btn"
-                    >
-                      <Trash2 size={16} />
-                    </button>
-                  </>
-                )}
-              </div>
+            ))
+          )}
+        </div>
+      ) : (
+        <>
+          {/* Desktop/tablet table */}
+          <div className="bg-white rounded-2xl shadow-soft border border-slate-100 overflow-hidden hidden sm:block">
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse mobile-compact-table">
+                <thead>
+                  <tr className="bg-slate-50 border-b border-slate-100">
+                    <th className="p-3 md:p-4 font-semibold text-slate-600 text-[11px] md:text-sm uppercase tracking-wider">Name</th>
+                    <th className="hidden md:table-cell p-3 md:p-4 font-semibold text-slate-600 text-[11px] md:text-sm uppercase tracking-wider">Phone</th>
+                    <th className="hidden lg:table-cell p-3 md:p-4 font-semibold text-slate-600 text-[11px] md:text-sm uppercase tracking-wider">Rate</th>
+                    <th className="p-3 md:p-4 font-semibold text-slate-600 text-[11px] md:text-sm uppercase tracking-wider text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {filteredCustomers.map((customer) => (
+                    <tr key={customer.id} className="hover:bg-slate-50 transition-colors group">
+                      <td className="p-3 md:p-4 font-medium text-slate-900 text-sm leading-tight">
+                        <div>
+                          <p className="font-bold text-slate-900">{customer.name}</p>
+                          <p className="text-xs text-slate-400 md:hidden mt-0.5">{customer.phone}</p>
+                        </div>
+                      </td>
+                      <td className="hidden md:table-cell p-3 md:p-4 text-slate-600 text-sm">{customer.phone}</td>
+                      <td className="hidden lg:table-cell p-3 md:p-4 text-slate-600 text-sm">₹{customer.default_rate || 30}/L</td>
+                      <td className="p-3 md:p-4 text-right">
+                        <div className="flex items-center justify-end gap-1">
+                          <button
+                            onClick={() => setHistoryCustomerId(customer.id)}
+                            className="p-2 text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors touch-btn"
+                            title="View Milk History"
+                          >
+                            <Milk size={15} />
+                          </button>
+                          {!readOnly && (
+                            <>
+                              <button
+                                onClick={() => {
+                                  setEditingCustomer(customer);
+                                  setFormData({ 
+                                    name: customer.name, 
+                                    phone: customer.phone, 
+                                    address: customer.address,
+                                    username: customer.username || '',
+                                    password: customer.password || '',
+                                    default_rate: customer.default_rate || 30,
+                                    gender: customer.gender || 'male',
+                                    bank_name: customer.bank_name || '',
+                                    account_number: customer.account_number || '',
+                                    ifsc_code: customer.ifsc_code || '',
+                                    upi_id: customer.upi_id || '',
+                                  });
+                                  setIsModalOpen(true);
+                                }}
+                                className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors touch-btn"
+                              >
+                                <Edit2 size={15} />
+                              </button>
+                              <button
+                                onClick={() => handleDelete(customer.id)}
+                                className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors touch-btn"
+                              >
+                                <Trash2 size={15} />
+                              </button>
+                            </>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                  {filteredCustomers.length === 0 && (
+                    <tr>
+                      <td colSpan={4} className="p-8 md:p-12 text-center text-slate-400 italic text-sm">
+                        No customers found.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
             </div>
-          </motion.div>
-        ))}
-      </div>
+          </div>
+
+          {/* Mobile card list */}
+          <div className="sm:hidden space-y-2.5">
+            {filteredCustomers.length === 0 && (
+              <div className="bg-white rounded-2xl border border-slate-100 p-8 text-center">
+                <div className="w-12 h-12 rounded-xl bg-slate-50 flex items-center justify-center text-slate-200 mx-auto mb-3">
+                  <User size={24} />
+                </div>
+                <p className="text-sm font-bold text-slate-400">No Customers</p>
+                <p className="text-xs text-slate-300 mt-1">Tap "Add Customer" to register a farmer.</p>
+              </div>
+            )}
+            {filteredCustomers.map((customer) => (
+              <motion.div
+                key={customer.id}
+                initial={{ opacity: 0, y: 6 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="bg-white rounded-xl border border-slate-100 p-4 shadow-soft"
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex items-center gap-3 flex-1 min-w-0">
+                    <div className="w-10 h-10 rounded-xl bg-emerald-50 flex items-center justify-center text-emerald-600 font-black text-sm flex-shrink-0">
+                      {customer.name.charAt(0).toUpperCase()}
+                    </div>
+                    <div className="min-w-0">
+                      <p className="font-bold text-slate-900 text-sm truncate">{customer.name}</p>
+                      <div className="flex items-center gap-3 mt-0.5">
+                        {customer.phone && (
+                          <span className="text-[11px] text-slate-400 flex items-center gap-1">
+                            <Phone size={10} />
+                            {customer.phone}
+                          </span>
+                        )}
+                        <span className="text-[11px] text-emerald-600 font-bold">₹{customer.default_rate || 30}/L</span>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-1 flex-shrink-0">
+                    <button
+                      onClick={() => setHistoryCustomerId(customer.id)}
+                      className="p-2 text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors touch-btn"
+                    >
+                      <Milk size={16} />
+                    </button>
+                    {!readOnly && (
+                      <>
+                        <button
+                          onClick={() => {
+                            setEditingCustomer(customer);
+                            setFormData({ 
+                              name: customer.name, 
+                              phone: customer.phone, 
+                              address: customer.address,
+                              username: customer.username || '',
+                              password: customer.password || '',
+                              default_rate: customer.default_rate || 30,
+                              gender: customer.gender || 'male',
+                              bank_name: customer.bank_name || '',
+                              account_number: customer.account_number || '',
+                              ifsc_code: customer.ifsc_code || '',
+                              upi_id: customer.upi_id || '',
+                            });
+                            setIsModalOpen(true);
+                          }}
+                          className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors touch-btn"
+                        >
+                          <Edit2 size={16} />
+                        </button>
+                        <button
+                          onClick={() => handleDelete(customer.id)}
+                          className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors touch-btn"
+                        >
+                          <Trash2 size={16} />
+                        </button>
+                      </>
+                    )}
+                  </div>
+                </div>
+              </motion.div>
+            ))}
+          </div>
+        </>
+      )}
 
       {/* Add/Edit Modal */}
       <AnimatePresence>
