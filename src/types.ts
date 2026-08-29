@@ -121,9 +121,17 @@ export interface Stats {
   pendingPayments: number;
 }
 
+export type BillingCycle = '1-10' | '11-20' | '21-end' | 'full' | 'custom';
+
 export interface BillingRecord {
   customer_id: string;
   name: string;
+  phone?: string;
+  upi_id?: string;
+  bank_name?: string;
+  account_number?: string;
+  ifsc_code?: string;
+  customer_code?: string;
   total_liters: number;
   total_amount: number;
   total_advance: number;
@@ -135,4 +143,38 @@ export interface BillingRecord {
   final_payable: number;
   advance_balance: number;
 }
+
+export type CattleType = 'cow' | 'buffalo';
+export type CattleStatus = 'active' | 'lactating' | 'dry' | 'pregnant' | 'sold';
+
+export interface Cattle {
+  id: string;
+  customer_id: string;
+  customer_name?: string;
+  customer_code?: string;
+  name?: string;
+  type: CattleType;
+  dob?: string;
+  status: CattleStatus;
+  vaccination_count?: number;
+  last_vaccination_date?: string;
+  next_due_date?: string;
+  created_at: string;
+}
+
+export interface CattleVaccination {
+  id: string;
+  cattle_id: string;
+  customer_id: string;
+  cattle_name?: string;
+  cattle_type?: CattleType;
+  customer_name?: string;
+  customer_code?: string;
+  vaccination_date: string;
+  next_due_date?: string;
+  administered_by?: string;
+  notes?: string;
+  created_at: string;
+}
+
 

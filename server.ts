@@ -57,6 +57,8 @@ async function initDB() {
   try { await db.execute("ALTER TABLE advances ADD COLUMN type TEXT NOT NULL DEFAULT 'advance'"); } catch (_) {}
   try { await db.execute("ALTER TABLE customers ADD COLUMN default_rate REAL DEFAULT 30"); } catch (_) {}
   try { await db.execute("ALTER TABLE milk_entries ADD COLUMN rate REAL NOT NULL DEFAULT 30"); } catch (_) {}
+  try { await db.execute("ALTER TABLE milk_entries ADD COLUMN fat REAL DEFAULT 0"); } catch (_) {}
+  try { await db.execute("ALTER TABLE milk_entries ADD COLUMN snf REAL DEFAULT 0"); } catch (_) {}
   try { await db.execute("ALTER TABLE customers ADD COLUMN cattle_feed_reduction REAL DEFAULT 0"); } catch (_) {}
   try { await db.execute("ALTER TABLE customers ADD COLUMN gender TEXT"); } catch (_) {}
   try { await db.execute("ALTER TABLE customers ADD COLUMN otp TEXT"); } catch (_) {}
@@ -182,6 +184,27 @@ async function initDB() {
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
 
+    CREATE TABLE IF NOT EXISTS cattle (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      customer_id INTEGER NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
+      name TEXT,
+      type TEXT NOT NULL DEFAULT 'cow',
+      dob TEXT,
+      status TEXT NOT NULL DEFAULT 'active',
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS cattle_vaccinations (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      cattle_id INTEGER NOT NULL REFERENCES cattle(id) ON DELETE CASCADE,
+      customer_id INTEGER NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
+      vaccination_date DATE NOT NULL,
+      next_due_date DATE,
+      administered_by TEXT,
+      notes TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+
     -- Speed up customer lookups by phone and sort by name
     CREATE INDEX IF NOT EXISTS idx_customers_phone ON customers(phone);
     CREATE INDEX IF NOT EXISTS idx_customers_name ON customers(name);
@@ -190,11 +213,15 @@ async function initDB() {
     -- Speed up filtering and joining by customer_id
     CREATE INDEX IF NOT EXISTS idx_advances_customer_id ON advances(customer_id);
     CREATE INDEX IF NOT EXISTS idx_feed_purchases_customer_id ON feed_purchases(customer_id);
+    CREATE INDEX IF NOT EXISTS idx_cattle_customer_id ON cattle(customer_id);
+    CREATE INDEX IF NOT EXISTS idx_cattle_vaccinations_cattle_id ON cattle_vaccinations(cattle_id);
+    CREATE INDEX IF NOT EXISTS idx_cattle_vaccinations_customer_id ON cattle_vaccinations(customer_id);
 
     -- Speed up filtering by date
     CREATE INDEX IF NOT EXISTS idx_milk_entries_date ON milk_entries(date);
     CREATE INDEX IF NOT EXISTS idx_advances_date ON advances(date);
     CREATE INDEX IF NOT EXISTS idx_feed_purchases_date ON feed_purchases(date);
+    CREATE INDEX IF NOT EXISTS idx_cattle_vaccinations_date ON cattle_vaccinations(vaccination_date);
   `);
 
   // Migration helper for optional bank details
@@ -999,6 +1026,216 @@ async function startServer() {
     res.json({ success: true });
   });
 
+  // ─── CATTLE & VACCINATIONS ──────────────────────────────────────────────────
+  app.get("/api/cattle", async (req, res) => {
+    try {
+      let customerId = typeof req.query.customerId === "string" ? req.query.customerId : undefined;
+      let vendorId = typeof req.query.vendorId === "string" ? req.query.vendorId : undefined;
+      const authHeader = req.headers.authorization;
+      if (authHeader) {
+        const token = authHeader.replace("Bearer ", "").trim();
+        if (token.startsWith("customer-token-")) {
+          customerId = token.replace("customer-token-", "");
+        } else if (token.startsWith("vendor-token-")) {
+          vendorId = token.replace("vendor-token-", "");
+        } else if (token.startsWith("worker-token-")) {
+          const workerId = token.replace("worker-token-", "");
+          const wRes = await db.execute({ sql: "SELECT vendor_id FROM workers WHERE id = ?", args: [workerId] });
+          if (wRes.rows[0]?.vendor_id) {
+            vendorId = String(wRes.rows[0].vendor_id);
+          }
+        }
+      }
+
+      let sql = `
+        SELECT c.*, cust.name as customer_name, cust.customer_code,
+          (SELECT COUNT(*) FROM cattle_vaccinations v WHERE v.cattle_id = c.id) as vaccination_count,
+          (SELECT MAX(v.vaccination_date) FROM cattle_vaccinations v WHERE v.cattle_id = c.id) as last_vaccination_date,
+          (SELECT MIN(v.next_due_date) FROM cattle_vaccinations v WHERE v.cattle_id = c.id AND v.next_due_date IS NOT NULL AND v.next_due_date != '') as next_due_date
+        FROM cattle c
+        JOIN customers cust ON c.customer_id = cust.id
+      `;
+      const args: any[] = [];
+      const conditions: string[] = [];
+
+      if (customerId) {
+        conditions.push("c.customer_id = ?");
+        args.push(customerId);
+      } else if (vendorId) {
+        conditions.push("cust.vendor_id = ?");
+        args.push(vendorId);
+      }
+
+      if (conditions.length > 0) {
+        sql += " WHERE " + conditions.join(" AND ");
+      }
+      sql += " ORDER BY c.id DESC";
+
+      const result = await db.execute({ sql, args });
+      res.json(result.rows);
+    } catch (err: any) {
+      console.error("[Cattle API GET Error]", err);
+      res.status(500).json({ error: err?.message || "Failed to fetch cattle" });
+    }
+  });
+
+  app.post("/api/cattle", async (req, res) => {
+    try {
+      let { customer_id, name, type = 'cow', dob, status = 'active' } = req.body;
+      const authHeader = req.headers.authorization;
+      if (authHeader && !customer_id) {
+        const token = authHeader.replace("Bearer ", "").trim();
+        if (token.startsWith("customer-token-")) {
+          customer_id = token.replace("customer-token-", "");
+        }
+      }
+
+      if (!customer_id) {
+        return res.status(400).json({ error: "Customer ID is required" });
+      }
+
+      const result = await db.execute({
+        sql: "INSERT INTO cattle (customer_id, name, type, dob, status) VALUES (?, ?, ?, ?, ?)",
+        args: [customer_id, name || null, type || 'cow', dob || null, status || 'active'],
+      });
+      res.json({ success: true, id: result.lastInsertRowid?.toString() });
+    } catch (err: any) {
+      console.error("[Cattle API POST Error]", err);
+      res.status(500).json({ error: err?.message || "Failed to add cattle" });
+    }
+  });
+
+  app.put("/api/cattle/:id", async (req, res) => {
+    try {
+      const { name, type = 'cow', dob, status = 'active' } = req.body;
+      await db.execute({
+        sql: "UPDATE cattle SET name = ?, type = ?, dob = ?, status = ? WHERE id = ?",
+        args: [name || null, type || 'cow', dob || null, status || 'active', req.params.id],
+      });
+      res.json({ success: true });
+    } catch (err: any) {
+      console.error("[Cattle API PUT Error]", err);
+      res.status(500).json({ error: err?.message || "Failed to update cattle" });
+    }
+  });
+
+  app.delete("/api/cattle/:id", async (req, res) => {
+    try {
+      await db.execute({ sql: "DELETE FROM cattle WHERE id = ?", args: [req.params.id] });
+      res.json({ success: true });
+    } catch (err: any) {
+      console.error("[Cattle API DELETE Error]", err);
+      res.status(500).json({ error: err?.message || "Failed to delete cattle" });
+    }
+  });
+
+  app.get("/api/cattle-vaccinations", async (req, res) => {
+    try {
+      let cattleId = typeof req.query.cattleId === "string" ? req.query.cattleId : undefined;
+      let customerId = typeof req.query.customerId === "string" ? req.query.customerId : undefined;
+      let vendorId = typeof req.query.vendorId === "string" ? req.query.vendorId : undefined;
+
+      const authHeader = req.headers.authorization;
+      if (authHeader) {
+        const token = authHeader.replace("Bearer ", "").trim();
+        if (token.startsWith("customer-token-")) {
+          customerId = token.replace("customer-token-", "");
+        } else if (token.startsWith("vendor-token-")) {
+          vendorId = token.replace("vendor-token-", "");
+        }
+      }
+
+      let sql = `
+        SELECT v.*, c.name as cattle_name, c.type as cattle_type, cust.name as customer_name, cust.customer_code
+        FROM cattle_vaccinations v
+        JOIN cattle c ON v.cattle_id = c.id
+        JOIN customers cust ON v.customer_id = cust.id
+      `;
+      const args: any[] = [];
+      const conditions: string[] = [];
+
+      if (cattleId) {
+        conditions.push("v.cattle_id = ?");
+        args.push(cattleId);
+      }
+      if (customerId) {
+        conditions.push("v.customer_id = ?");
+        args.push(customerId);
+      } else if (vendorId) {
+        conditions.push("cust.vendor_id = ?");
+        args.push(vendorId);
+      }
+
+      if (conditions.length > 0) {
+        sql += " WHERE " + conditions.join(" AND ");
+      }
+      sql += " ORDER BY v.vaccination_date DESC, v.id DESC";
+
+      const result = await db.execute({ sql, args });
+      res.json(result.rows);
+    } catch (err: any) {
+      console.error("[Vaccination API GET Error]", err);
+      res.status(500).json({ error: err?.message || "Failed to fetch vaccinations" });
+    }
+  });
+
+  app.post("/api/cattle-vaccinations", async (req, res) => {
+    try {
+      let { cattle_id, customer_id, vaccination_date, next_due_date, administered_by, notes } = req.body;
+
+      if (!cattle_id) {
+        return res.status(400).json({ error: "Cattle ID is required" });
+      }
+      if (!vaccination_date) {
+        return res.status(400).json({ error: "Vaccination date is required" });
+      }
+
+      if (!customer_id) {
+        const cRes = await db.execute({ sql: "SELECT customer_id FROM cattle WHERE id = ?", args: [cattle_id] });
+        if (!cRes.rows[0]) {
+          return res.status(404).json({ error: "Cattle not found" });
+        }
+        customer_id = cRes.rows[0].customer_id;
+      }
+
+      const result = await db.execute({
+        sql: "INSERT INTO cattle_vaccinations (cattle_id, customer_id, vaccination_date, next_due_date, administered_by, notes) VALUES (?, ?, ?, ?, ?, ?)",
+        args: [cattle_id, customer_id, vaccination_date, next_due_date || null, administered_by || null, notes || null],
+      });
+      res.json({ success: true, id: result.lastInsertRowid?.toString() });
+    } catch (err: any) {
+      console.error("[Vaccination API POST Error]", err);
+      res.status(500).json({ error: err?.message || "Failed to record vaccination" });
+    }
+  });
+
+  app.put("/api/cattle-vaccinations/:id", async (req, res) => {
+    try {
+      const { vaccination_date, next_due_date, administered_by, notes } = req.body;
+      if (!vaccination_date) {
+        return res.status(400).json({ error: "Vaccination date is required" });
+      }
+      await db.execute({
+        sql: "UPDATE cattle_vaccinations SET vaccination_date = ?, next_due_date = ?, administered_by = ?, notes = ? WHERE id = ?",
+        args: [vaccination_date, next_due_date || null, administered_by || null, notes || null, req.params.id],
+      });
+      res.json({ success: true });
+    } catch (err: any) {
+      console.error("[Vaccination API PUT Error]", err);
+      res.status(500).json({ error: err?.message || "Failed to update vaccination" });
+    }
+  });
+
+  app.delete("/api/cattle-vaccinations/:id", async (req, res) => {
+    try {
+      await db.execute({ sql: "DELETE FROM cattle_vaccinations WHERE id = ?", args: [req.params.id] });
+      res.json({ success: true });
+    } catch (err: any) {
+      console.error("[Vaccination API DELETE Error]", err);
+      res.status(500).json({ error: err?.message || "Failed to delete vaccination" });
+    }
+  });
+
   // ─── MILK ENTRIES ───────────────────────────────────────────────────────────
   app.get("/api/entries", async (req, res) => {
     const customerId = typeof req.query.customerId === "string" ? req.query.customerId : undefined;
@@ -1581,8 +1818,48 @@ async function startServer() {
   });
 
   // ─── BILLING ────────────────────────────────────────────────────────────────
+  function getDateRange(monthStr?: string, cycleStr?: string, customStart?: string, customEnd?: string) {
+    if (customStart && customEnd) {
+      return { startDate: customStart, endDate: customEnd };
+    }
+    const month = monthStr || new Date().toISOString().substring(0, 7);
+    const parts = month.split('-');
+    const year = parseInt(parts[0] || String(new Date().getFullYear()), 10);
+    const m = parseInt(parts[1] || String(new Date().getMonth() + 1), 10);
+    const lastDay = new Date(year, m, 0).getDate();
+    const pad = (n: number) => String(n).padStart(2, '0');
+
+    if (cycleStr === '1-10') {
+      return {
+        startDate: `${year}-${pad(m)}-01`,
+        endDate: `${year}-${pad(m)}-10`,
+      };
+    } else if (cycleStr === '11-20') {
+      return {
+        startDate: `${year}-${pad(m)}-11`,
+        endDate: `${year}-${pad(m)}-20`,
+      };
+    } else if (cycleStr === '21-end') {
+      return {
+        startDate: `${year}-${pad(m)}-21`,
+        endDate: `${year}-${pad(m)}-${pad(lastDay)}`,
+      };
+    } else {
+      return {
+        startDate: `${year}-${pad(m)}-01`,
+        endDate: `${year}-${pad(m)}-${pad(lastDay)}`,
+      };
+    }
+  }
+
   app.get("/api/billing/:month", async (req, res) => {
     const month = req.params.month;
+    const { startDate, endDate } = getDateRange(
+      month,
+      req.query.cycle as string,
+      req.query.startDate as string,
+      req.query.endDate as string
+    );
     const authHeader = req.headers.authorization;
     let worker_id: number | null = null;
     let vendor_id: number | null = null;
@@ -1603,17 +1880,18 @@ async function startServer() {
     }
 
     let sql = `SELECT
-              c.id as customer_id, c.name, COALESCE(c.cattle_feed_reduction, 0) as cattle_feed_reduction,
+              c.id as customer_id, c.name, c.phone, c.upi_id, c.bank_name, c.account_number, c.ifsc_code, c.customer_code,
+              COALESCE(c.cattle_feed_reduction, 0) as cattle_feed_reduction,
               COALESCE(SUM(e.liters), 0) as total_liters,
               COALESCE(SUM(e.amount), 0) as total_amount,
-              COALESCE((SELECT SUM(amount) FROM advances WHERE customer_id = c.id AND date LIKE ? AND type = 'advance'), 0) as total_advance,
-              COALESCE((SELECT SUM(amount) FROM advances WHERE customer_id = c.id AND date LIKE ? AND type = 'deduction'), 0) as total_deduction,
-              COALESCE((SELECT SUM(amount) FROM feed_purchases WHERE customer_id = c.id AND date LIKE ?), 0) as total_feed,
+              COALESCE((SELECT SUM(amount) FROM advances WHERE customer_id = c.id AND date >= ? AND date <= ? AND type = 'advance'), 0) as total_advance,
+              COALESCE((SELECT SUM(amount) FROM advances WHERE customer_id = c.id AND date >= ? AND date <= ? AND type = 'deduction'), 0) as total_deduction,
+              COALESCE((SELECT SUM(amount) FROM feed_purchases WHERE customer_id = c.id AND date >= ? AND date <= ?), 0) as total_feed,
               (COALESCE((SELECT SUM(amount) FROM advances WHERE customer_id = c.id AND type = 'advance'), 0) -
                COALESCE((SELECT SUM(amount) FROM advances WHERE customer_id = c.id AND type = 'deduction'), 0)) as advance_balance
             FROM customers c
-            LEFT JOIN milk_entries e ON c.id = e.customer_id AND e.date LIKE ? ${worker_id ? "AND e.worker_id = ?" : ""}`;
-    const args: any[] = [`${month}%`, `${month}%`, `${month}%`, `${month}%`];
+            LEFT JOIN milk_entries e ON c.id = e.customer_id AND e.date >= ? AND e.date <= ? ${worker_id ? "AND e.worker_id = ?" : ""}`;
+    const args: any[] = [startDate, endDate, startDate, endDate, startDate, endDate, startDate, endDate];
     if (worker_id) {
       args.push(worker_id);
     }
@@ -1638,6 +1916,12 @@ async function startServer() {
 
   app.get("/api/billing/:month/:customerId", async (req, res) => {
     const { month, customerId } = req.params;
+    const { startDate, endDate } = getDateRange(
+      month,
+      req.query.cycle as string,
+      req.query.startDate as string,
+      req.query.endDate as string
+    );
     const authHeader = req.headers.authorization;
     let worker_id: number | null = null;
     if (authHeader) {
@@ -1651,21 +1935,23 @@ async function startServer() {
     if (!custR.rows[0]) return res.status(404).json({ message: "Customer not found" });
 
     const milkSql = worker_id 
-      ? "SELECT date, shift, liters, amount FROM milk_entries WHERE customer_id = ? AND date LIKE ? AND worker_id = ? ORDER BY date ASC, shift ASC"
-      : "SELECT date, shift, liters, amount FROM milk_entries WHERE customer_id = ? AND date LIKE ? ORDER BY date ASC, shift ASC";
-    const milkArgs = worker_id ? [customerId, `${month}%`, worker_id] : [customerId, `${month}%`];
+      ? "SELECT date, shift, liters, fat, snf, rate, amount FROM milk_entries WHERE customer_id = ? AND date >= ? AND date <= ? AND worker_id = ? ORDER BY date ASC, shift ASC"
+      : "SELECT date, shift, liters, fat, snf, rate, amount FROM milk_entries WHERE customer_id = ? AND date >= ? AND date <= ? ORDER BY date ASC, shift ASC";
+    const milkArgs = worker_id ? [customerId, startDate, endDate, worker_id] : [customerId, startDate, endDate];
 
     const [milkR, advR, feedR, borrR, repR, payR] = await Promise.all([
       db.execute({ sql: milkSql, args: milkArgs }),
-      db.execute({ sql: "SELECT date, amount, type FROM advances WHERE customer_id = ? AND date LIKE ? ORDER BY date ASC", args: [customerId, `${month}%`] }),
-      db.execute({ sql: "SELECT p.date, p.quantity, p.amount, t.name as feed_name FROM feed_purchases p JOIN feed_types t ON p.feed_type_id = t.id WHERE p.customer_id = ? AND p.date LIKE ? ORDER BY p.date ASC", args: [customerId, `${month}%`] }),
+      db.execute({ sql: "SELECT id, date, amount, type FROM advances WHERE customer_id = ? AND date >= ? AND date <= ? ORDER BY date ASC", args: [customerId, startDate, endDate] }),
+      db.execute({ sql: "SELECT p.id, p.date, p.quantity, p.amount, t.name as feed_name FROM feed_purchases p JOIN feed_types t ON p.feed_type_id = t.id WHERE p.customer_id = ? AND p.date >= ? AND p.date <= ? ORDER BY p.date ASC", args: [customerId, startDate, endDate] }),
       db.execute({ sql: "SELECT SUM(amount) as total FROM advances WHERE customer_id = ? AND type = 'advance'", args: [customerId] }),
       db.execute({ sql: "SELECT SUM(amount) as total FROM advances WHERE customer_id = ? AND type = 'deduction'", args: [customerId] }),
-      db.execute({ sql: "SELECT * FROM payments WHERE recipient_type = 'customer' AND recipient_id = ? AND date LIKE ? ORDER BY date DESC", args: [customerId, `${month}%`] }),
+      db.execute({ sql: "SELECT * FROM payments WHERE recipient_type = 'customer' AND recipient_id = ? AND date >= ? AND date <= ? ORDER BY date DESC", args: [customerId, startDate, endDate] }),
     ]);
 
     res.json({
       customer: custR.rows[0],
+      startDate,
+      endDate,
       milkEntries: milkR.rows,
       advances: advR.rows,
       feedPurchases: feedR.rows,

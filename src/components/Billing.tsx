@@ -1,6 +1,26 @@
 import { useState, useEffect } from 'react';
-import { FileText, Download, Printer, Search, ArrowLeft, Calendar, Droplets, Wallet, Package, ChevronRight, Send, IndianRupee, QrCode, CreditCard, Banknote } from 'lucide-react';
-import { BillingRecord } from '../types';
+import { 
+  FileText, 
+  Download, 
+  Printer, 
+  Search, 
+  ArrowLeft, 
+  Calendar, 
+  Droplets, 
+  Wallet, 
+  Package, 
+  ChevronRight, 
+  Send, 
+  IndianRupee, 
+  QrCode, 
+  CreditCard, 
+  Banknote,
+  SlidersHorizontal,
+  Clock,
+  Sparkles
+} from 'lucide-react';
+import * as XLSX from 'xlsx';
+import { BillingRecord, BillingCycle } from '../types';
 import { motion } from 'motion/react';
 import SearchBar from './SearchBar';
 import { useDebouncedValue } from '../hooks/useDebouncedValue';
@@ -24,6 +44,8 @@ export default function Billing({ customerId, isWorker = false, workerId, isCust
   const [billingData, setBillingData] = useState<BillingRecord[]>([]);
   const [detailedData, setDetailedData] = useState<{
     customer?: any;
+    startDate?: string;
+    endDate?: string;
     milkEntries: any[];
     advances: any[];
     feedPurchases: any[];
@@ -31,12 +53,79 @@ export default function Billing({ customerId, isWorker = false, workerId, isCust
     advanceBalance?: number;
   } | null>(null);
   const [detailError, setDetailError] = useState<string | null>(null);
-  const [showPayModal, setShowPayModal] = useState(false);
   
-  const [selectedMonth, setSelectedMonth] = useState(new Date().toISOString().split('T')[0].substring(0, 7));
+  // Active period filters
+  const [selectedMonth, setSelectedMonth] = useState(() => new Date().toISOString().split('T')[0].substring(0, 7));
+  const [selectedCycle, setSelectedCycle] = useState<BillingCycle>('1-10');
+  const [customStartDate, setCustomStartDate] = useState('');
+  const [customEndDate, setCustomEndDate] = useState('');
+  
+  // Payout modal state
+  const [payingTarget, setPayingTarget] = useState<{
+    recipientName: string;
+    recipientId: string;
+    amount: number;
+    phone?: string;
+    upiId?: string;
+    bankName?: string;
+    accountNumber?: string;
+    ifscCode?: string;
+    note?: string;
+  } | null>(null);
+
   const [search, setSearch] = useState('');
   const debouncedSearch = useDebouncedValue(search, 400);
   const [viewingDetails, setViewingDetails] = useState<string | null>(customerId || null);
+
+  // Helper to compute display dates for the active cycle
+  const getCycleDates = (monthStr: string, cycle: BillingCycle, customStart?: string, customEnd?: string) => {
+    if (cycle === 'custom' && customStart && customEnd) {
+      return { 
+        startDate: customStart, 
+        endDate: customEnd, 
+        label: `${customStart} to ${customEnd}`,
+        shortLabel: 'Custom'
+      };
+    }
+    const [yearStr, mStr] = monthStr.split('-');
+    const year = parseInt(yearStr || String(new Date().getFullYear()), 10);
+    const m = parseInt(mStr || String(new Date().getMonth() + 1), 10);
+    const lastDay = new Date(year, m, 0).getDate();
+    const pad = (n: number) => String(n).padStart(2, '0');
+    const monthName = new Date(year, m - 1, 1).toLocaleDateString('default', { month: 'short', year: 'numeric' });
+
+    if (cycle === '1-10') {
+      return {
+        startDate: `${year}-${pad(m)}-01`,
+        endDate: `${year}-${pad(m)}-10`,
+        label: `1 – 10 ${monthName} (Cycle 1)`,
+        shortLabel: '1st - 10th',
+      };
+    } else if (cycle === '11-20') {
+      return {
+        startDate: `${year}-${pad(m)}-11`,
+        endDate: `${year}-${pad(m)}-20`,
+        label: `11 – 20 ${monthName} (Cycle 2)`,
+        shortLabel: '11th - 20th',
+      };
+    } else if (cycle === '21-end') {
+      return {
+        startDate: `${year}-${pad(m)}-21`,
+        endDate: `${year}-${pad(m)}-${pad(lastDay)}`,
+        label: `21 – ${lastDay} ${monthName} (Cycle 3)`,
+        shortLabel: '21st - End',
+      };
+    } else {
+      return {
+        startDate: `${year}-${pad(m)}-01`,
+        endDate: `${year}-${pad(m)}-${pad(lastDay)}`,
+        label: `${monthName} (Full Month)`,
+        shortLabel: 'Full Month',
+      };
+    }
+  };
+
+  const currentCycleInfo = getCycleDates(selectedMonth, selectedCycle, customStartDate, customEndDate);
 
   useEffect(() => {
     if (customerId) {
@@ -46,24 +135,34 @@ export default function Billing({ customerId, isWorker = false, workerId, isCust
 
   useEffect(() => {
     if (viewingDetails) {
+      setDetailedData(null);
+      setDetailError(null);
       fetchDetailedBilling(viewingDetails);
     } else {
       setDetailError(null);
       setDetailedData(null);
       fetchBilling();
     }
-  }, [selectedMonth, viewingDetails]);
+  }, [selectedMonth, selectedCycle, customStartDate, customEndDate, viewingDetails]);
 
   const fetchBilling = () => {
-    fetch(`/api/billing/${selectedMonth}`, { headers: getAuthHeaders() })
+    let url = `/api/billing/${selectedMonth}?cycle=${selectedCycle}`;
+    if (selectedCycle === 'custom' && customStartDate && customEndDate) {
+      url += `&startDate=${customStartDate}&endDate=${customEndDate}`;
+    }
+    fetch(url, { headers: getAuthHeaders() })
       .then(res => res.json())
-      .then(data => setBillingData(data))
+      .then(data => setBillingData(Array.isArray(data) ? data : []))
       .catch(() => setBillingData([]));
   };
 
   const fetchDetailedBilling = (id: string) => {
     setDetailError(null);
-    fetch(`/api/billing/${selectedMonth}/${id}`, { headers: getAuthHeaders() })
+    let url = `/api/billing/${selectedMonth}/${id}?cycle=${selectedCycle}`;
+    if (selectedCycle === 'custom' && customStartDate && customEndDate) {
+      url += `&startDate=${customStartDate}&endDate=${customEndDate}`;
+    }
+    fetch(url, { headers: getAuthHeaders() })
       .then(async (res) => {
         if (!res.ok) {
           const payload = await res.json().catch(() => ({}));
@@ -79,6 +178,30 @@ export default function Billing({ customerId, isWorker = false, workerId, isCust
         setDetailError(String(error.message || error));
         setDetailedData(null);
       });
+  };
+
+  const handleExportExcel = () => {
+    if (!billingData || billingData.length === 0) return;
+    const exportRows = filteredBilling.map((b, i) => ({
+      'S.No': i + 1,
+      'Farmer Name': b.name,
+      'Customer ID': b.customer_id,
+      'Phone': b.phone || '',
+      'UPI ID': b.upi_id || '',
+      'Total Milk (Liters)': Number(b.total_liters.toFixed(1)),
+      'Gross Milk Amount (₹)': Number(b.total_amount.toFixed(0)),
+      'Advances Repaid (₹)': Number(b.total_deduction.toFixed(0)),
+      'Total Feed Cost (₹)': Number(b.total_feed.toFixed(0)),
+      'Feed Subsidy/Reduction (₹)': Number(b.cattle_feed_reduction.toFixed(0)),
+      'Net Feed (₹)': Number(b.net_cattle_feed.toFixed(0)),
+      'All-Time Advance Debt (₹)': Number(b.advance_balance.toFixed(0)),
+      'Final Net Payable (₹)': Number(b.final_payable.toFixed(0)),
+    }));
+
+    const worksheet = XLSX.utils.json_to_sheet(exportRows);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'Billing Statement');
+    XLSX.writeFile(workbook, `DairyFlow_Settlement_${selectedMonth}_${selectedCycle}.xlsx`);
   };
 
   const getPaymentModeIcon = (mode?: string) => {
@@ -99,7 +222,95 @@ export default function Billing({ customerId, isWorker = false, workerId, isCust
 
   const filteredBilling = billingData.filter(b => 
     b.name.toLowerCase().includes(debouncedSearch.toLowerCase()) ||
-    b.customer_id.toLowerCase().includes(debouncedSearch.toLowerCase())
+    b.customer_id.toLowerCase().includes(debouncedSearch.toLowerCase()) ||
+    (b.phone && b.phone.includes(debouncedSearch))
+  );
+
+  // Cycle Selector Component
+  const renderCycleSelector = () => (
+    <div className="flex flex-col gap-2">
+      <div className="flex flex-wrap items-center gap-1.5 p-1 bg-slate-100 rounded-2xl border border-slate-200/70">
+        <button
+          onClick={() => setSelectedCycle('1-10')}
+          className={`px-3 py-1.5 rounded-xl text-xs font-black transition-all touch-btn ${
+            selectedCycle === '1-10' 
+              ? 'bg-emerald-600 text-white shadow-sm' 
+              : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/50'
+          }`}
+        >
+          {t('cycle1')}
+        </button>
+        <button
+          onClick={() => setSelectedCycle('11-20')}
+          className={`px-3 py-1.5 rounded-xl text-xs font-black transition-all touch-btn ${
+            selectedCycle === '11-20' 
+              ? 'bg-emerald-600 text-white shadow-sm' 
+              : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/50'
+          }`}
+        >
+          {t('cycle2')}
+        </button>
+        <button
+          onClick={() => setSelectedCycle('21-end')}
+          className={`px-3 py-1.5 rounded-xl text-xs font-black transition-all touch-btn ${
+            selectedCycle === '21-end' 
+              ? 'bg-emerald-600 text-white shadow-sm' 
+              : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/50'
+          }`}
+        >
+          {t('cycle3')}
+        </button>
+        <button
+          onClick={() => setSelectedCycle('full')}
+          className={`px-3 py-1.5 rounded-xl text-xs font-black transition-all touch-btn ${
+            selectedCycle === 'full' 
+              ? 'bg-emerald-600 text-white shadow-sm' 
+              : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/50'
+          }`}
+        >
+          {t('entireMonth')}
+        </button>
+        <button
+          onClick={() => setSelectedCycle('custom')}
+          className={`px-3 py-1.5 rounded-xl text-xs font-black transition-all touch-btn flex items-center gap-1 ${
+            selectedCycle === 'custom' 
+              ? 'bg-emerald-600 text-white shadow-sm' 
+              : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/50'
+          }`}
+        >
+          <SlidersHorizontal size={11} />
+          {t('customRange')}
+        </button>
+      </div>
+
+      {selectedCycle === 'custom' && (
+        <motion.div 
+          initial={{ opacity: 0, y: -4 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="flex flex-wrap items-center gap-2 bg-white p-2 rounded-xl border border-slate-200 shadow-sm"
+        >
+          <div className="flex items-center gap-1.5">
+            <span className="text-[10px] font-black text-slate-400 uppercase tracking-wider">{t('startDate')}:</span>
+            <input
+              type="date"
+              value={customStartDate}
+              onChange={(e) => setCustomStartDate(e.target.value)}
+              className="px-2.5 py-1 bg-slate-50 border border-slate-200 rounded-lg text-xs font-bold text-slate-700 outline-none"
+            />
+          </div>
+          <span className="text-xs text-slate-400 font-bold">→</span>
+          <div className="flex items-center gap-1.5">
+            <span className="text-[10px] font-black text-slate-400 uppercase tracking-wider">{t('endDate')}:</span>
+            <input
+              type="date"
+              value={customEndDate}
+              onChange={(e) => setCustomEndDate(e.target.value)}
+              className="px-2.5 py-1 bg-slate-50 border border-slate-200 rounded-lg text-xs font-bold text-slate-700 outline-none"
+            />
+          </div>
+        </motion.div>
+      )}
+    </div>
   );
 
   if (viewingDetails) {
@@ -127,7 +338,7 @@ export default function Billing({ customerId, isWorker = false, workerId, isCust
       return (
         <div className="space-y-4 md:space-y-10 pb-4 md:pb-20">
           <div className="bg-white rounded-2xl border border-slate-100 p-8 text-center shadow-soft">
-            <p className="text-lg font-display font-bold text-slate-900">{t('loadingReport')}</p>
+            <p className="text-lg font-display font-bold text-slate-900">{t('loading')}</p>
           </div>
         </div>
       );
@@ -145,14 +356,14 @@ export default function Billing({ customerId, isWorker = false, workerId, isCust
     // Cattle Feed Reduction logic
     const cattleFeedReduction = detailedData.customer?.cattle_feed_reduction || 0;
     const netCattleFeed = Math.max(0, totalFeedAmount - cattleFeedReduction);
-    const remainingBalance = netCattleFeed; // Formula: Net - Amount Already Reduced (0)
+    const remainingBalance = netCattleFeed;
     
     const finalPayable = Math.max(0, totalMilkAmount - totalBillDeductions - cattleFeedReduction);
 
     return (
-      <div className="space-y-4 md:space-y-10 pb-4 md:pb-20">
+      <div className="space-y-4 md:space-y-8 pb-4 md:pb-20">
         {/* Header */}
-        <div className="flex flex-col gap-3 md:flex-row md:gap-6 md:justify-between md:items-start md:items-end md:mb-8">
+        <div className="flex flex-col gap-3 md:flex-row md:gap-6 md:justify-between md:items-start md:items-end">
           <div className="flex items-center gap-3 md:gap-6">
             {!customerId && (
               <button 
@@ -167,38 +378,61 @@ export default function Billing({ customerId, isWorker = false, workerId, isCust
                 <span className="px-2 py-0.5 bg-emerald-100 text-emerald-700 text-[10px] font-black rounded-full uppercase tracking-[0.15em]">
                   {t('consolidatedStatement')}
                 </span>
-                <div className="flex items-center gap-1 text-slate-400 text-[10px] font-black uppercase tracking-widest">
-                  <Calendar size={10} />
-                  {new Date(selectedMonth + '-01').toLocaleDateString('default', { month: 'long', year: 'numeric' })}
-                </div>
+                <span className="px-2 py-0.5 bg-slate-100 text-slate-700 text-[10px] font-bold rounded-full flex items-center gap-1">
+                  <Clock size={10} className="text-emerald-600" />
+                  {currentCycleInfo.label}
+                </span>
               </div>
               <h2 className="page-title">
                 {customerId ? t('personal') : (billingData.find(b => b.customer_id === viewingDetails)?.name || t('farmer'))} <span className="text-emerald-600">{t('balance')}</span>
               </h2>
             </div>
           </div>
-          <div className="flex items-center gap-2 bg-white p-1.5 rounded-xl md:rounded-2xl border border-slate-100 shadow-soft w-full md:w-auto">
+          <div className="flex flex-wrap items-center gap-2 bg-white p-1.5 rounded-xl md:rounded-2xl border border-slate-100 shadow-soft w-full md:w-auto">
             <input
               type="month"
               value={selectedMonth}
               onChange={(e) => setSelectedMonth(e.target.value)}
-              className="flex-1 md:w-40 px-3 py-2 rounded-lg text-sm font-bold text-slate-700 focus:bg-slate-50 outline-none transition-all"
+              className="flex-1 md:w-36 px-2.5 py-1.5 rounded-lg text-xs font-bold text-slate-700 focus:bg-slate-50 outline-none transition-all"
             />
             <button 
               onClick={() => window.print()}
               className="w-9 h-9 md:w-10 md:h-10 flex items-center justify-center border border-slate-100 rounded-lg md:rounded-xl text-slate-400 hover:text-slate-900 hover:bg-slate-50 transition-all touch-btn"
-              title="Print Statement"
+              title={t('printStatement')}
             >
               <Printer size={16} />
             </button>
             {!isWorker && !isCustomer && detailedData?.customer && (
               <button
-                onClick={() => setShowPayModal(true)}
+                onClick={() => setPayingTarget({
+                  recipientName: detailedData.customer.name,
+                  recipientId: String(detailedData.customer.id),
+                  amount: finalPayable,
+                  phone: detailedData.customer.phone,
+                  upiId: detailedData.customer.upi_id,
+                  bankName: detailedData.customer.bank_name,
+                  accountNumber: detailedData.customer.account_number,
+                  ifscCode: detailedData.customer.ifsc_code,
+                  note: `Milk Payout (${currentCycleInfo.shortLabel} ${selectedMonth})`
+                })}
                 className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-lg md:rounded-xl transition-all flex items-center gap-1.5 shadow-sm touch-btn"
               >
-                <Send size={14} /> Pay Farmer
+                <QrCode size={14} /> Pay via UPI
               </button>
             )}
+          </div>
+        </div>
+
+        {/* 10-Day Cycle Filter Bar */}
+        <div className="bg-white p-3 md:p-4 rounded-2xl md:rounded-3xl border border-slate-100 shadow-soft">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{t('billingCycle')}:</span>
+              <span className="text-xs font-bold text-slate-800 bg-emerald-50 text-emerald-800 px-2 py-0.5 rounded-lg border border-emerald-100">
+                {currentCycleInfo.label}
+              </span>
+            </div>
+            {renderCycleSelector()}
           </div>
         </div>
 
@@ -219,7 +453,7 @@ export default function Billing({ customerId, isWorker = false, workerId, isCust
           </div>
         ) : (
           <>
-            {/* Money Received Banner — shown only in customer portal when vendor has sent payment */}
+            {/* Money Received Banner */}
             {isCustomer && (detailedData as any).payments && (detailedData as any).payments.length > 0 && (() => {
               const totalReceived = ((detailedData as any).payments as any[]).reduce((sum: number, p: any) => sum + p.amount, 0);
               return (
@@ -291,7 +525,7 @@ export default function Billing({ customerId, isWorker = false, workerId, isCust
                 </div>
               </div>
 
-              {/* Advance Remaining Balance card — shows total advances given minus all deductions made (all-time outstanding) */}
+              {/* Advance Remaining Balance card */}
               <div className="bento-card border-rose-100 bg-rose-50/20 flex flex-col justify-between col-span-1">
                 <div className="flex flex-col gap-1 md:gap-3 text-rose-500 mb-2 md:mb-6">
                   <div className="w-8 h-8 md:w-10 md:h-10 bg-rose-500 text-white rounded-lg md:rounded-xl flex items-center justify-center shadow-lg shadow-rose-100 shrink-0">
@@ -305,7 +539,7 @@ export default function Billing({ customerId, isWorker = false, workerId, isCust
                 <div>
                   <p className="text-lg md:text-3xl font-display font-bold text-rose-600 tracking-tight">₹{((detailedData as any).advanceBalance || 0).toFixed(0)}</p>
                   {isCustomer && (
-                    <p className="text-[8px] text-rose-400 mt-1 uppercase font-black tracking-widest hidden md:block">After this month's deductions</p>
+                    <p className="text-[8px] text-rose-400 mt-1 uppercase font-black tracking-widest hidden md:block">After all deductions</p>
                   )}
                 </div>
               </div>
@@ -329,16 +563,16 @@ export default function Billing({ customerId, isWorker = false, workerId, isCust
           <div className="bg-white rounded-2xl md:rounded-[2.5rem] border border-slate-100 p-4 md:p-10 shadow-soft overflow-hidden relative">
             <div className="absolute top-0 right-0 w-64 h-64 bg-emerald-50 rounded-full blur-3xl -mr-32 -mt-32 opacity-50" />
             <div className="relative z-10">
-              <div className="mb-5 md:mb-10 flex flex-col md:flex-row md:justify-between md:items-start gap-2">
+              <div className="mb-5 md:mb-8 flex flex-col md:flex-row md:justify-between md:items-start gap-2">
                 <div>
                   <h3 className="section-heading mb-1">{t('monthlyStatement')}</h3>
-                  <p className="text-xs md:text-sm text-slate-400 font-medium">
-                    {new Date(selectedMonth + '-01').toLocaleDateString('default', { month: 'long', year: 'numeric' })}
+                  <p className="text-xs md:text-sm text-slate-500 font-medium">
+                    Billing Period: <span className="font-bold text-slate-800">{currentCycleInfo.label}</span>
                   </p>
                 </div>
                 <div className="text-left md:text-right">
                   <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-0.5">{t('statementDate')}</p>
-                  <p className="text-xs font-bold text-slate-900">{new Date().toLocaleDateString()}</p>
+                  <p className="text-xs font-bold text-slate-900">{new Date().toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}</p>
                 </div>
               </div>
 
@@ -379,7 +613,7 @@ export default function Billing({ customerId, isWorker = false, workerId, isCust
                         </tr>
                         <tr className="bg-white/50">
                           <td className="py-4 text-sm md:text-base font-black text-slate-900">{t('finalNetSettlement')}</td>
-                          <td className="py-4 text-xl md:text-2xl font-display font-bold text-slate-900 text-right">₹{finalPayable.toFixed(2)}</td>
+                          <td className="py-4 text-xl md:text-2xl font-display font-bold text-slate-900 text-right text-emerald-700">₹{finalPayable.toFixed(2)}</td>
                         </tr>
                       </tbody>
                     </table>
@@ -408,6 +642,12 @@ export default function Billing({ customerId, isWorker = false, workerId, isCust
                           <span className="text-xs md:text-sm font-bold text-slate-400">{t('farmerId')}</span>
                           <span className="text-xs md:text-sm font-black text-white">#F-{viewingDetails}</span>
                         </div>
+                        {detailedData.customer?.upi_id && (
+                          <div className="flex justify-between">
+                            <span className="text-xs md:text-sm font-bold text-slate-400">UPI ID</span>
+                            <span className="text-xs md:text-sm font-mono font-bold text-emerald-400">{detailedData.customer.upi_id}</span>
+                          </div>
+                        )}
                         <div className="flex justify-between">
                           <span className="text-xs md:text-sm font-bold text-slate-400">{t('baseRate')}</span>
                           <span className="text-xs md:text-sm font-black text-white">₹{((detailedData as any).customer?.default_rate || 30).toFixed(2)}/L</span>
@@ -418,10 +658,28 @@ export default function Billing({ customerId, isWorker = false, workerId, isCust
                         </div>
                       </div>
                     </div>
-                    <div className="mt-5 md:mt-8 pt-5 md:pt-8 border-t border-white/10">
+                    <div className="mt-5 md:mt-8 pt-5 md:pt-8 border-t border-white/10 flex flex-col gap-2">
+                      {!isWorker && !isCustomer && (
+                        <button 
+                          onClick={() => setPayingTarget({
+                            recipientName: detailedData.customer?.name || 'Farmer',
+                            recipientId: String(detailedData.customer?.id || viewingDetails),
+                            amount: finalPayable,
+                            phone: detailedData.customer?.phone,
+                            upiId: detailedData.customer?.upi_id,
+                            bankName: detailedData.customer?.bank_name,
+                            accountNumber: detailedData.customer?.account_number,
+                            ifscCode: detailedData.customer?.ifsc_code,
+                            note: `Milk Payout (${currentCycleInfo.shortLabel} ${selectedMonth})`
+                          })}
+                          className="w-full py-2.5 md:py-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-black uppercase tracking-wider transition-all flex items-center justify-center gap-1.5 touch-btn shadow-md"
+                        >
+                          <QrCode size={14} /> Pay via UPI / QR
+                        </button>
+                      )}
                       <button 
                         onClick={() => window.print()}
-                        className="w-full py-2.5 md:py-3 bg-white/10 hover:bg-white/20 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all touch-btn"
+                        className="w-full py-2.5 md:py-3 bg-white/10 hover:bg-white/20 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all touch-btn text-center"
                       >
                         {t('printStatement')}
                       </button>
@@ -460,7 +718,7 @@ export default function Billing({ customerId, isWorker = false, workerId, isCust
                     <tr key={idx} className="group hover:bg-slate-50/50 transition-colors">
                       <td className="px-4 md:px-8 py-2.5 md:py-4">
                         <p className="text-xs md:text-sm font-bold text-slate-700">
-                          {new Date(e.date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}
+                          {new Date(e.date + 'T00:00:00').toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}
                         </p>
                       </td>
                       <td className="px-4 md:px-8 py-2.5 md:py-4">
@@ -485,6 +743,9 @@ export default function Billing({ customerId, isWorker = false, workerId, isCust
                       )}
                     </tr>
                   ))}
+                  {detailedData.milkEntries.length === 0 && (
+                    <tr><td colSpan={isWorker ? 3 : 5} className="py-6 text-center text-slate-300 italic font-medium text-sm">No milk entries recorded for this cycle period.</td></tr>
+                  )}
                   <tr className="bg-slate-50">
                     <td colSpan={2} className="px-4 md:px-8 py-3 md:py-4 text-xs md:text-sm font-black text-slate-900 uppercase">{t('subtotal')}</td>
                     <td className="px-4 md:px-8 py-3 md:py-4 text-xs md:text-sm font-black text-slate-900">{detailedData.milkEntries.reduce((acc, curr) => acc + curr.liters, 0).toFixed(1)} L</td>
@@ -521,7 +782,7 @@ export default function Billing({ customerId, isWorker = false, workerId, isCust
                       {detailedData.feedPurchases.map((p, idx) => (
                         <tr key={idx} className="hover:bg-slate-50 transition-colors">
                           <td className="px-4 md:px-8 py-2.5 md:py-4 text-[10px] md:text-xs font-bold text-slate-500">
-                            {new Date(p.date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}
+                            {new Date(p.date + 'T00:00:00').toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}
                           </td>
                           <td className="px-4 md:px-8 py-2.5 md:py-4 text-xs md:text-sm font-bold text-slate-700">{p.feed_name}</td>
                           <td className="hidden sm:table-cell px-4 md:px-8 py-2.5 md:py-4 text-[10px] md:text-xs font-black text-slate-400">{p.quantity} kg</td>
@@ -558,7 +819,7 @@ export default function Billing({ customerId, isWorker = false, workerId, isCust
                       {detailedData.advances.map((a: any, idx) => (
                         <tr key={idx} className="hover:bg-slate-50 transition-colors">
                           <td className="px-4 md:px-8 py-2.5 md:py-4 text-[10px] md:text-xs font-bold text-slate-500">
-                            {new Date(a.date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}
+                            {new Date(a.date + 'T00:00:00').toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}
                           </td>
                           <td className="px-4 md:px-8 py-2.5 md:py-4">
                             <span className={`px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-widest ${
@@ -634,22 +895,24 @@ export default function Billing({ customerId, isWorker = false, workerId, isCust
           )}
         </div>
 
-        {/* Send Money Modal for Farmer */}
-        {showPayModal && detailedData?.customer && (
+        {/* Global SendMoneyModal */}
+        {payingTarget && (
           <SendMoneyModal
-            isOpen={showPayModal}
-            onClose={() => setShowPayModal(false)}
-            recipientName={detailedData.customer.name}
+            isOpen={!!payingTarget}
+            onClose={() => setPayingTarget(null)}
+            recipientName={payingTarget.recipientName}
             recipientType="customer"
-            recipientId={String(detailedData.customer.id)}
-            amount={finalPayable}
-            bankName={detailedData.customer.bank_name}
-            accountNumber={detailedData.customer.account_number}
-            ifscCode={detailedData.customer.ifsc_code}
-            upiId={detailedData.customer.upi_id}
-            note={`Milk Payout for ${selectedMonth}`}
+            recipientId={payingTarget.recipientId}
+            amount={payingTarget.amount}
+            phone={payingTarget.phone}
+            upiId={payingTarget.upiId}
+            bankName={payingTarget.bankName}
+            accountNumber={payingTarget.accountNumber}
+            ifscCode={payingTarget.ifscCode}
+            note={payingTarget.note || `Milk Payout (${currentCycleInfo.shortLabel} ${selectedMonth})`}
             onPaymentRecorded={() => {
               if (viewingDetails) fetchDetailedBilling(viewingDetails);
+              else fetchBilling();
             }}
           />
         )}
@@ -658,9 +921,9 @@ export default function Billing({ customerId, isWorker = false, workerId, isCust
   }
 
   return (
-    <div className="space-y-4 md:space-y-10">
+    <div className="space-y-4 md:space-y-8">
       {/* Header */}
-      <div className="flex flex-col gap-3 md:flex-row md:gap-6 md:justify-between md:items-start md:items-end md:mb-8">
+      <div className="flex flex-col gap-3 md:flex-row md:gap-6 md:justify-between md:items-start md:items-end">
         <div>
           <div className="flex items-center gap-2 mb-1 md:mb-3">
             <span className="px-2 py-0.5 md:px-3 md:py-1 bg-emerald-100 text-emerald-700 text-[10px] font-black rounded-full uppercase tracking-[0.15em]">
@@ -672,17 +935,20 @@ export default function Billing({ customerId, isWorker = false, workerId, isCust
                 type="month"
                 value={selectedMonth}
                 onChange={(e) => setSelectedMonth(e.target.value)}
-                className="pl-7 pr-3 py-1 rounded-full bg-white border border-slate-100 text-[10px] font-black text-slate-600 outline-none hover:border-slate-300 transition-all cursor-pointer uppercase tracking-widest"
+                className="pl-7 pr-3 py-1 rounded-full bg-white border border-slate-200 text-[10px] font-black text-slate-600 outline-none hover:border-slate-300 transition-all cursor-pointer uppercase tracking-widest"
               />
             </div>
           </div>
           <h2 className="page-title">
             {t('settlementJournal').split(' ')[0]} <span className="text-emerald-600">{t('settlementJournal').split(' ').slice(1).join(' ')}</span>
           </h2>
+          <p className="text-xs text-slate-400 font-medium mt-0.5">
+            Active Cycle: <span className="font-bold text-slate-700">{currentCycleInfo.label}</span>
+          </p>
         </div>
 
         <div className="flex items-center gap-2 w-full md:w-auto">
-          <div className="flex-1 md:w-72">
+          <div className="flex-1 md:w-64">
             <SearchBar
               value={search}
               onChange={setSearch}
@@ -690,13 +956,33 @@ export default function Billing({ customerId, isWorker = false, workerId, isCust
               className="w-full"
             />
           </div>
-          <button className="w-10 h-10 md:w-14 md:h-14 flex items-center justify-center bg-white border border-slate-100 rounded-xl md:rounded-[1.5rem] text-slate-400 hover:text-slate-900 hover:border-slate-300 shadow-soft active:scale-95 transition-all touch-btn flex-shrink-0">
+          <button 
+            onClick={() => window.print()}
+            className="w-10 h-10 md:w-12 md:h-12 flex items-center justify-center bg-white border border-slate-100 rounded-xl text-slate-400 hover:text-slate-900 hover:border-slate-300 shadow-soft active:scale-95 transition-all touch-btn flex-shrink-0"
+            title={t('printStatement')}
+          >
             <Printer size={16} />
           </button>
-          <button className="hidden md:flex items-center gap-2 bg-emerald-600 text-white px-6 py-4 rounded-[1.5rem] font-black text-xs uppercase tracking-widest hover:bg-emerald-700 transition-all shadow-lg shadow-emerald-100 active:scale-95 touch-btn">
-            <Download size={18} />
+          <button 
+            onClick={handleExportExcel}
+            className="hidden md:flex items-center gap-1.5 bg-emerald-600 text-white px-5 py-3 rounded-xl font-black text-xs uppercase tracking-widest hover:bg-emerald-700 transition-all shadow-lg shadow-emerald-100 active:scale-95 touch-btn"
+          >
+            <Download size={15} />
             {t('export')}
           </button>
+        </div>
+      </div>
+
+      {/* 10-Day Cycle Selection Bar */}
+      <div className="bg-white p-3.5 md:p-5 rounded-2xl md:rounded-[2rem] border border-slate-100 shadow-soft">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{t('billingCycle')}:</span>
+            <span className="text-xs font-bold text-slate-800 bg-emerald-50 text-emerald-800 px-2.5 py-0.5 rounded-lg border border-emerald-100">
+              {currentCycleInfo.label}
+            </span>
+          </div>
+          {renderCycleSelector()}
         </div>
       </div>
 
@@ -706,52 +992,79 @@ export default function Billing({ customerId, isWorker = false, workerId, isCust
           <table className="w-full text-left border-collapse">
             <thead>
               <tr className="bg-slate-50/50 border-b border-slate-50">
-                <th className="px-6 md:px-10 py-4 md:py-6 font-black text-slate-500 text-[10px] uppercase tracking-[0.2em]">{t('farmer')}</th>
-                <th className="px-6 md:px-10 py-4 md:py-6 font-black text-slate-500 text-[10px] uppercase tracking-[0.2em]">{t('volL')}</th>
-                {!isWorker && <th className="px-6 md:px-10 py-4 md:py-6 font-black text-slate-500 text-[10px] uppercase tracking-[0.2em]">{t('grossRevenue')}</th>}
-                {!isWorker && <th className="px-6 md:px-10 py-4 md:py-6 font-black text-slate-500 text-[10px] uppercase tracking-[0.2em]">{t('cattleFeedDetails')}</th>}
-                {!isWorker && <th className="px-6 md:px-10 py-4 md:py-6 font-black text-slate-500 text-[10px] uppercase tracking-[0.2em] text-right">{t('debt')}</th>}
-                {!isWorker && <th className="px-6 md:px-10 py-4 md:py-6 font-black text-slate-500 text-[10px] uppercase tracking-[0.2em] text-right">{t('netSettlement')}</th>}
-                <th className="px-6 md:px-10 py-4 md:py-6 font-black text-slate-500 text-[10px] uppercase tracking-[0.2em] text-center">{t('view')}</th>
+                <th className="px-6 md:px-8 py-4 md:py-5 font-black text-slate-500 text-[10px] uppercase tracking-[0.2em]">{t('farmer')}</th>
+                <th className="px-4 md:px-6 py-4 md:py-5 font-black text-slate-500 text-[10px] uppercase tracking-[0.2em]">{t('volL')}</th>
+                {!isWorker && <th className="px-4 md:px-6 py-4 md:py-5 font-black text-slate-500 text-[10px] uppercase tracking-[0.2em]">{t('grossRevenue')}</th>}
+                {!isWorker && <th className="px-4 md:px-6 py-4 md:py-5 font-black text-slate-500 text-[10px] uppercase tracking-[0.2em]">{t('cattleFeedDetails')}</th>}
+                {!isWorker && <th className="px-4 md:px-6 py-4 md:py-5 font-black text-slate-500 text-[10px] uppercase tracking-[0.2em] text-right">{t('debt')}</th>}
+                {!isWorker && <th className="px-4 md:px-6 py-4 md:py-5 font-black text-slate-500 text-[10px] uppercase tracking-[0.2em] text-right">{t('netSettlement')}</th>}
+                <th className="px-4 md:px-6 py-4 md:py-5 font-black text-slate-500 text-[10px] uppercase tracking-[0.2em] text-center">Action / Pay</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-50">
               {filteredBilling.map((record: any) => (
                 <tr key={record.customer_id} className="group hover:bg-emerald-50/20 transition-all">
-                  <td className="px-6 md:px-10 py-4 md:py-6 font-bold text-slate-900 tracking-tight text-sm">{record.name}</td>
-                  <td className="px-6 md:px-10 py-4 md:py-6 font-black text-slate-400 text-sm tracking-tight">{record.total_liters.toFixed(1)}</td>
-                  {!isWorker && <td className="px-6 md:px-10 py-4 md:py-6 font-display font-black text-slate-700 text-base tracking-tight">₹{record.total_amount.toFixed(0)}</td>}
+                  <td className="px-6 md:px-8 py-4 md:py-5">
+                    <p className="font-bold text-slate-900 tracking-tight text-sm">{record.name}</p>
+                    <p className="text-[11px] text-slate-400 font-mono">
+                      {record.phone ? record.phone : `#${record.customer_id}`}
+                      {record.upi_id && <span className="ml-1 text-emerald-600 font-sans font-medium">({record.upi_id})</span>}
+                    </p>
+                  </td>
+                  <td className="px-4 md:px-6 py-4 md:py-5 font-black text-slate-600 text-sm tracking-tight">{record.total_liters.toFixed(1)} L</td>
+                  {!isWorker && <td className="px-4 md:px-6 py-4 md:py-5 font-display font-black text-slate-700 text-sm tracking-tight">₹{record.total_amount.toFixed(0)}</td>}
                   {!isWorker && (
-                    <td className="px-6 md:px-10 py-4 md:py-6">
+                    <td className="px-4 md:px-6 py-4 md:py-5">
                       <div className="flex flex-wrap gap-1.5">
-                        {record.total_feed > 0 && <span className="px-2 py-0.5 rounded bg-orange-50 text-orange-600 text-[8px] font-black uppercase tracking-widest border border-orange-100">Total Feed: ₹{record.total_feed.toFixed(0)}</span>}
-                        {record.cattle_feed_reduction > 0 && <span className="px-2 py-0.5 rounded bg-rose-50 text-rose-600 text-[8px] font-black uppercase tracking-widest border border-rose-100">Reduction: ₹{record.cattle_feed_reduction.toFixed(0)}</span>}
-                        {record.net_cattle_feed > 0 && <span className="px-2 py-0.5 rounded bg-emerald-50 text-emerald-600 text-[8px] font-black uppercase tracking-widest border border-emerald-100">Net Feed: ₹{record.net_cattle_feed.toFixed(0)}</span>}
-                        {record.remaining_feed_balance > 0 && <span className="px-2 py-0.5 rounded bg-amber-50 text-amber-600 text-[8px] font-black uppercase tracking-widest border border-amber-100">Remaining Balance: ₹{record.remaining_feed_balance.toFixed(0)}</span>}
+                        {record.total_feed > 0 && <span className="px-2 py-0.5 rounded bg-orange-50 text-orange-600 text-[8px] font-black uppercase tracking-widest border border-orange-100">Feed: ₹{record.total_feed.toFixed(0)}</span>}
+                        {record.cattle_feed_reduction > 0 && <span className="px-2 py-0.5 rounded bg-rose-50 text-rose-600 text-[8px] font-black uppercase tracking-widest border border-rose-100">Reduc: ₹{record.cattle_feed_reduction.toFixed(0)}</span>}
+                        {record.net_cattle_feed > 0 && <span className="px-2 py-0.5 rounded bg-emerald-50 text-emerald-600 text-[8px] font-black uppercase tracking-widest border border-emerald-100">Net: ₹{record.net_cattle_feed.toFixed(0)}</span>}
                       </div>
                     </td>
                   )}
                   {!isWorker && (
-                    <td className="px-6 md:px-10 py-4 md:py-6 text-rose-500 font-display font-black text-base text-right tracking-tight">
+                    <td className="px-4 md:px-6 py-4 md:py-5 text-rose-500 font-display font-black text-sm text-right tracking-tight">
                       <span className={record.advance_balance > 0 ? 'opacity-100' : 'opacity-20'}>₹{record.advance_balance.toFixed(0)}</span>
                     </td>
                   )}
                   {!isWorker && (
-                    <td className="px-6 md:px-10 py-4 md:py-6 text-right">
-                      <span className={`px-3 py-1.5 rounded-2xl font-display font-black text-sm shadow-sm ring-1 ring-inset ${
+                    <td className="px-4 md:px-6 py-4 md:py-5 text-right">
+                      <span className={`px-2.5 py-1 rounded-xl font-display font-black text-sm shadow-sm ring-1 ring-inset ${
                         record.final_payable > 0 ? 'bg-emerald-100 text-emerald-700 ring-emerald-200' : 'bg-slate-100 text-slate-500 ring-slate-200'
                       }`}>
                         ₹{record.final_payable.toFixed(0)}
                       </span>
                     </td>
                   )}
-                  <td className="px-6 md:px-10 py-4 md:py-6 text-center">
-                    <button 
-                      onClick={() => setViewingDetails(record.customer_id)}
-                      className="w-10 h-10 rounded-[1.2rem] bg-white border border-slate-100 flex items-center justify-center text-slate-400 hover:text-emerald-600 hover:border-emerald-200 hover:bg-emerald-50 shadow-soft transition-all mx-auto active:scale-90 touch-btn"
-                    >
-                      <FileText size={18} />
-                    </button>
+                  <td className="px-4 md:px-6 py-4 md:py-5 text-center">
+                    <div className="flex items-center justify-center gap-1.5">
+                      {!isWorker && record.final_payable > 0 && (
+                        <button
+                          onClick={() => setPayingTarget({
+                            recipientName: record.name,
+                            recipientId: record.customer_id,
+                            amount: record.final_payable,
+                            phone: record.phone,
+                            upiId: record.upi_id,
+                            bankName: record.bank_name,
+                            accountNumber: record.account_number,
+                            ifscCode: record.ifsc_code,
+                            note: `Milk Payout (${currentCycleInfo.shortLabel} ${selectedMonth})`
+                          })}
+                          className="inline-flex items-center gap-1 px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-sm transition-all touch-btn"
+                          title="Pay via Dynamic UPI QR"
+                        >
+                          <QrCode size={13} /> Pay UPI
+                        </button>
+                      )}
+                      <button 
+                        onClick={() => setViewingDetails(record.customer_id)}
+                        className="w-9 h-9 rounded-xl bg-white border border-slate-100 flex items-center justify-center text-slate-400 hover:text-emerald-600 hover:border-emerald-200 hover:bg-emerald-50 shadow-soft transition-all active:scale-90 touch-btn"
+                        title="View Statement"
+                      >
+                        <FileText size={16} />
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -762,7 +1075,7 @@ export default function Billing({ customerId, isWorker = false, workerId, isCust
                       <Search size={32} />
                     </div>
                     <p className="text-base font-display font-bold text-slate-400">{t('noRecordsFound')}</p>
-                    <p className="text-sm text-slate-300 font-medium">{t('noEntriesForMonth')}</p>
+                    <p className="text-sm text-slate-300 font-medium">No milk entries recorded for this cycle period.</p>
                   </td>
                 </tr>
               )}
@@ -772,14 +1085,14 @@ export default function Billing({ customerId, isWorker = false, workerId, isCust
       </div>
 
       {/* Mobile card list for billing */}
-      <div className="md:hidden space-y-2.5">
+      <div className="md:hidden space-y-3">
         {filteredBilling.length === 0 && (
           <div className="bg-white rounded-2xl border border-slate-100 p-8 text-center">
             <div className="w-12 h-12 bg-slate-50 rounded-xl flex items-center justify-center text-slate-200 mx-auto mb-3">
               <Search size={24} />
             </div>
             <p className="text-sm font-bold text-slate-400">{t('noRecords')}</p>
-            <p className="text-xs text-slate-300 mt-1">{t('noEntriesFoundForMonth')}</p>
+            <p className="text-xs text-slate-300 mt-1">No entries found for {currentCycleInfo.shortLabel}.</p>
           </div>
         )}
         {filteredBilling.map((record: any) => (
@@ -787,82 +1100,117 @@ export default function Billing({ customerId, isWorker = false, workerId, isCust
             key={record.customer_id}
             initial={{ opacity: 0, y: 6 }}
             animate={{ opacity: 1, y: 0 }}
-            className="bg-white rounded-xl border border-slate-100 p-3.5 shadow-soft"
+            className="bg-white rounded-2xl border border-slate-100 p-4 shadow-soft space-y-3"
           >
-            <div className="flex items-start justify-between gap-2 mb-2.5">
+            <div className="flex items-start justify-between gap-2">
               <div>
                 <p className="font-bold text-slate-900 text-sm">{record.name}</p>
-                <p className="text-[11px] text-slate-400 mt-0.5">{record.total_liters.toFixed(1)} {t('lSupplied')}</p>
+                <p className="text-[11px] text-slate-400 mt-0.5">
+                  {record.total_liters.toFixed(1)} {t('lSupplied')}
+                  {record.upi_id && <span className="ml-1 text-emerald-600 font-mono font-medium">· {record.upi_id}</span>}
+                </p>
               </div>
               <button 
                 onClick={() => setViewingDetails(record.customer_id)}
-                className="flex items-center gap-1 px-3 py-1.5 rounded-xl bg-emerald-50 text-emerald-700 text-[11px] font-black uppercase tracking-wide touch-btn"
+                className="flex items-center gap-1 px-3 py-1.5 rounded-xl bg-slate-100 text-slate-700 text-[11px] font-black uppercase tracking-wide touch-btn"
               >
                 {t('view')} <ChevronRight size={12} />
               </button>
             </div>
-            {/* Show Feed Reduction details in mobile layout */}
+
             {!isWorker && (
-              <div className="flex flex-wrap gap-1 mb-2.5">
-                {record.total_feed > 0 && <span className="px-1.5 py-0.5 rounded bg-orange-50 text-orange-600 text-[8px] font-black uppercase tracking-widest border border-orange-100">Total Feed: ₹{record.total_feed.toFixed(0)}</span>}
-                {record.cattle_feed_reduction > 0 && <span className="px-1.5 py-0.5 rounded bg-rose-50 text-rose-600 text-[8px] font-black uppercase tracking-widest border border-rose-100">Reduction: ₹{record.cattle_feed_reduction.toFixed(0)}</span>}
-                {record.net_cattle_feed > 0 && <span className="px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-600 text-[8px] font-black uppercase tracking-widest border border-emerald-100">Net Feed: ₹{record.net_cattle_feed.toFixed(0)}</span>}
-                {record.remaining_feed_balance > 0 && <span className="px-1.5 py-0.5 rounded bg-amber-50 text-amber-600 text-[8px] font-black uppercase tracking-widest border border-amber-100">Remaining Bal: ₹{record.remaining_feed_balance.toFixed(0)}</span>}
-              </div>
-            )}
-            {!isWorker && (
-              <div className="grid grid-cols-3 gap-2 pt-2.5 border-t border-slate-50">
+              <div className="grid grid-cols-3 gap-2 py-2 px-3 bg-slate-50 rounded-xl">
                 <div className="text-center">
                   <p className="text-[9px] text-slate-400 uppercase font-black tracking-wider">{t('gross')}</p>
-                  <p className="text-sm font-display font-bold text-slate-700">₹{record.total_amount.toFixed(0)}</p>
+                  <p className="text-xs font-display font-bold text-slate-700">₹{record.total_amount.toFixed(0)}</p>
                 </div>
                 <div className="text-center">
                   <p className="text-[9px] text-slate-400 uppercase font-black tracking-wider">{t('debt')}</p>
-                  <p className={`text-sm font-display font-bold ${record.advance_balance > 0 ? 'text-rose-500' : 'text-slate-300'}`}>
+                  <p className={`text-xs font-display font-bold ${record.advance_balance > 0 ? 'text-rose-500' : 'text-slate-300'}`}>
                     ₹{record.advance_balance.toFixed(0)}
                   </p>
                 </div>
                 <div className="text-center">
-                  <p className="text-[9px] text-emerald-500 uppercase font-black tracking-wider">{t('netPay')}</p>
-                  <p className="text-sm font-display font-bold text-emerald-600">₹{record.final_payable.toFixed(0)}</p>
+                  <p className="text-[9px] text-emerald-600 uppercase font-black tracking-wider">{t('netPay')}</p>
+                  <p className="text-sm font-display font-black text-emerald-700">₹{record.final_payable.toFixed(0)}</p>
                 </div>
               </div>
+            )}
+
+            {!isWorker && record.final_payable > 0 && (
+              <button
+                onClick={() => setPayingTarget({
+                  recipientName: record.name,
+                  recipientId: record.customer_id,
+                  amount: record.final_payable,
+                  phone: record.phone,
+                  upiId: record.upi_id,
+                  bankName: record.bank_name,
+                  accountNumber: record.account_number,
+                  ifscCode: record.ifsc_code,
+                  note: `Milk Payout (${currentCycleInfo.shortLabel} ${selectedMonth})`
+                })}
+                className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 shadow-sm touch-btn"
+              >
+                <QrCode size={14} /> Pay ₹{record.final_payable.toFixed(0)} via UPI
+              </button>
             )}
           </motion.div>
         ))}
       </div>
 
       {/* Summary footer cards */}
-      <div className={`grid gap-3 md:gap-8 ${isWorker ? 'grid-cols-1 max-w-xs' : 'grid-cols-2 md:grid-cols-4'}`}>
+      <div className={`grid gap-3 md:gap-6 ${isWorker ? 'grid-cols-1 max-w-xs' : 'grid-cols-2 md:grid-cols-4'}`}>
         <div className="bento-card bg-emerald-50 border-emerald-100">
           <p className="text-[10px] text-emerald-600 font-black uppercase tracking-[0.2em] mb-1 md:mb-2">{t('totalLiters')}</p>
-          <p className="text-xl md:text-4xl font-display font-bold text-emerald-900 tracking-tight">
-            {filteredBilling.reduce((acc: any, curr: any) => acc + curr.total_liters, 0).toFixed(0)} <span className="text-sm md:text-xl">L</span>
+          <p className="text-xl md:text-3xl font-display font-bold text-emerald-900 tracking-tight">
+            {filteredBilling.reduce((acc: any, curr: any) => acc + curr.total_liters, 0).toFixed(1)} <span className="text-sm md:text-lg">L</span>
           </p>
         </div>
         {!isWorker && (
           <>
             <div className="bento-card border-slate-100">
               <p className="text-[10px] text-slate-400 font-black uppercase tracking-[0.2em] mb-1 md:mb-2">{t('totalDebt')}</p>
-              <p className="text-xl md:text-4xl font-display font-bold text-rose-500 tracking-tight">
+              <p className="text-xl md:text-3xl font-display font-bold text-rose-500 tracking-tight">
                 ₹{filteredBilling.reduce((acc: any, curr: any) => acc + curr.advance_balance, 0).toFixed(0)}
               </p>
             </div>
             <div className="bento-card border-slate-100">
               <p className="text-[10px] text-slate-400 font-black uppercase tracking-[0.2em] mb-1 md:mb-2">{t('deductions')}</p>
-              <p className="text-xl md:text-4xl font-display font-bold text-slate-900 tracking-tight">
+              <p className="text-xl md:text-3xl font-display font-bold text-slate-900 tracking-tight">
                 ₹{filteredBilling.reduce((acc: any, curr: any) => acc + curr.total_feed + (curr.total_deduction || 0), 0).toFixed(0)}
               </p>
             </div>
-            <div className="bento-card bg-slate-900 text-white shadow-2xl">
+            <div className="bento-card bg-slate-900 text-white shadow-xl">
               <p className="text-[10px] text-slate-400 font-black uppercase tracking-[0.2em] mb-1 md:mb-2">{t('netPayout')}</p>
-              <p className="text-xl md:text-4xl font-display font-bold tracking-tight">
+              <p className="text-xl md:text-3xl font-display font-bold tracking-tight text-emerald-400">
                 ₹{filteredBilling.reduce((acc: any, curr: any) => acc + curr.final_payable, 0).toFixed(0)}
               </p>
             </div>
           </>
         )}
       </div>
+
+      {/* Global SendMoneyModal for Row & Card Payouts */}
+      {payingTarget && (
+        <SendMoneyModal
+          isOpen={!!payingTarget}
+          onClose={() => setPayingTarget(null)}
+          recipientName={payingTarget.recipientName}
+          recipientType="customer"
+          recipientId={payingTarget.recipientId}
+          amount={payingTarget.amount}
+          phone={payingTarget.phone}
+          upiId={payingTarget.upiId}
+          bankName={payingTarget.bankName}
+          accountNumber={payingTarget.accountNumber}
+          ifscCode={payingTarget.ifscCode}
+          note={payingTarget.note || `Milk Payout (${currentCycleInfo.shortLabel} ${selectedMonth})`}
+          onPaymentRecorded={() => {
+            fetchBilling();
+          }}
+        />
+      )}
     </div>
   );
 }

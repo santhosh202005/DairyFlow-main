@@ -5,7 +5,10 @@ import './index.css';
 import { LanguageProvider } from './i18n';
 
 // ── Capacitor Native API Base URL Interceptor ───────────────────────────
-const API_BASE_URL = 'https://dairyflow-main.onrender.com';
+// Always use localhost for development; production URL is set on render.yaml
+const API_BASE_URL = typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
+  ? 'http://localhost:3000'
+  : 'https://dairyflow-main.onrender.com';
 const originalFetch = window.fetch;
 window.fetch = function (input: RequestInfo | URL, init?: RequestInit) {
   let url = typeof input === 'string' ? input : input instanceof URL ? input.href : (input as Request).url;

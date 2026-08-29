@@ -25,7 +25,8 @@ import {
   MapPin,
   Store,
   ClipboardCheck,
-  IndianRupee
+  IndianRupee,
+  ShieldCheck
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import Dashboard from './components/Dashboard';
@@ -51,6 +52,7 @@ import Customers from './components/Customers';
 import MilkEntries from './components/MilkEntries';
 import Advances from './components/Advances';
 import CattleFeed from './components/CattleFeed';
+import CattleManagement from './components/CattleManagement';
 import Login from './components/Login';
 import Settings from './components/Settings';
 import VendorManagement from './components/VendorManagement';
@@ -58,9 +60,10 @@ import WorkerManagement from './components/WorkerManagement';
 import WorkerAttendance from './components/WorkerAttendance';
 import WorkerSalary from './components/WorkerSalary';
 import WorkerReport from './components/WorkerReport';
+import UserManual from './components/UserManual';
 
 
-type View = 'dashboard' | 'customers' | 'entries' | 'advances' | 'feed' | 'settings' | 'vendors' | 'workers' | 'attendance' | 'salary' | 'my-reports';
+type View = 'dashboard' | 'customers' | 'entries' | 'advances' | 'feed' | 'cattle' | 'settings' | 'vendors' | 'workers' | 'attendance' | 'salary' | 'my-reports' | 'manual';
 
 
 export default function App() {
@@ -406,6 +409,7 @@ export default function App() {
     ] : [
       { id: 'dashboard', label: navLabel('monitor', 'Monitor'), icon: LayoutDashboard },
     ]),
+    { id: 'manual', label: 'Manual', icon: Info },
     ...(authData.role === 'vendor' ? [
       { id: 'workers', label: navLabel('workers', 'Workers'), icon: Store },
       { id: 'attendance', label: navLabel('attendance', 'Attendance'), icon: ClipboardCheck },
@@ -414,11 +418,13 @@ export default function App() {
       { id: 'entries', label: navLabel('logistics', 'Logistics'), icon: Milk },
       { id: 'advances', label: navLabel('ledger', 'Ledger'), icon: Wallet },
       { id: 'feed', label: navLabel('resources', 'Resources'), icon: Package },
+      { id: 'cattle', label: navLabel('cattleRecords', 'Cattle & Vaccines'), icon: ShieldCheck },
     ] : authData.role === 'worker' ? [
       { id: 'entries', label: navLabel('logistics', 'Logistics'), icon: Milk },
       { id: 'my-reports', label: navLabel('myReports', 'My Salary & Reports'), icon: FileText },
     ] : authData.role === 'customer' ? [
       { id: 'entries', label: navLabel('mySupply', 'My Supply'), icon: Milk },
+      { id: 'cattle', label: navLabel('cattleRecords', 'Cattle & Vaccines'), icon: ShieldCheck },
       { id: 'advances', label: navLabel('myLedger', 'My Ledger'), icon: Wallet },
       { id: 'feed', label: navLabel('myStocks', 'My Stocks'), icon: Package },
     ] : []),
@@ -501,6 +507,7 @@ export default function App() {
               : activeView === 'entries' ? t('milkSupply')
               : activeView === 'advances' ? t('advances')
               : activeView === 'feed' ? t('cattleFeed')
+              : activeView === 'cattle' ? (t('cattleManagement') || 'Farm & Cattle')
               : activeView === 'settings' ? t('settings')
               : (activeView as string).replace('-', ' ')}
           </h1>
@@ -623,6 +630,7 @@ export default function App() {
               }}
             >
               {activeView === 'dashboard' && <Dashboard customerId={authData.customerId} vendorId={authData.vendorId} workerId={authData.workerId} onNavigate={setActiveView} />}
+              {activeView === 'manual' && <UserManual userRole={authData.role} />}
               {activeView === 'vendors' && authData.role === 'admin' && <VendorManagement />}
               {activeView === 'workers' && authData.role === 'vendor' && <WorkerManagement vendorId={authData.vendorId} />}
               {activeView === 'attendance' && authData.role === 'vendor' && <WorkerAttendance vendorId={authData.vendorId} />}
@@ -632,6 +640,15 @@ export default function App() {
               {activeView === 'entries' && authData.role !== 'admin' && <MilkEntries customerId={authData.customerId} vendorId={authData.vendorId} workerId={authData.workerId} workerName={authData.workerName} isAdmin={false} isVendor={authData.role === 'vendor' || authData.role === 'worker'} isWorker={authData.role === 'worker'} defaultRate={authData.defaultRate} />}
               {activeView === 'advances' && authData.role !== 'admin' && authData.role !== 'worker' && <Advances customerId={authData.customerId} vendorId={authData.vendorId} isAdmin={false} isVendor={authData.role === 'vendor'} />}
               {activeView === 'feed' && authData.role !== 'admin' && authData.role !== 'worker' && <CattleFeed customerId={authData.customerId} vendorId={authData.vendorId} isAdmin={false} isVendor={authData.role === 'vendor'} />}
+              {activeView === 'cattle' && (authData.role === 'customer' || authData.role === 'vendor' || authData.role === 'admin') && (
+                <CattleManagement 
+                  customerId={authData.customerId} 
+                  vendorId={authData.vendorId} 
+                  isAdmin={authData.role === 'admin'} 
+                  isVendor={authData.role === 'vendor'} 
+                  isFarmer={authData.role === 'customer'} 
+                />
+              )}
               {activeView === 'settings' && (
                 <Settings 
                   authData={authData} 
