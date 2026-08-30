@@ -4,18 +4,32 @@ import App from './App.tsx';
 import './index.css';
 import { LanguageProvider } from './i18n';
 
-// ── Capacitor Native API Base URL Interceptor ───────────────────────────
-// Always use localhost for development; production URL is set on render.yaml
-const API_BASE_URL = typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
-  ? 'http://localhost:3000'
-  : 'https://dairyflow-main.onrender.com';
+// ── API Base URL Interceptor ───────────────────────────────────────────────
+// Use a deployed backend in native apps and on the hosted site. Only use localhost
+// when running the app in a standard local dev environment.
+const getApiBaseUrl = () => {
+  const override = import.meta.env.VITE_API_BASE_URL;
+  if (override) return override.replace(/\/$/, '');
+
+  if (typeof window === 'undefined') return 'https://dairyflow-main.onrender.com';
+
+  const isNativeApp = !!(window as any).Capacitor
+    || window.location.protocol === 'capacitor:'
+    || window.location.protocol === 'file:';
+  const isLocalDevHost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+
+  if (isLocalDevHost && !isNativeApp) return 'http://localhost:3000';
+  return 'https://dairyflow-main.onrender.com';
+};
+
+const API_BASE_URL = getApiBaseUrl();
 const originalFetch = window.fetch;
 window.fetch = function (input: RequestInfo | URL, init?: RequestInit) {
   let url = typeof input === 'string' ? input : input instanceof URL ? input.href : (input as Request).url;
-  
-  const isLocalApi = url.startsWith('/api/') || 
-                     url.startsWith('http://localhost/api/') || 
-                     url.startsWith('https://localhost/api/') || 
+
+  const isLocalApi = url.startsWith('/api/') ||
+                     url.startsWith('http://localhost/api/') ||
+                     url.startsWith('https://localhost/api/') ||
                      url.startsWith('capacitor://localhost/api/');
 
   if (isLocalApi) {
@@ -28,7 +42,7 @@ window.fetch = function (input: RequestInfo | URL, init?: RequestInit) {
   } else {
     input = url;
   }
-  
+
   return originalFetch(input, init);
 };
 
