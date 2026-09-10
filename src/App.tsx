@@ -26,7 +26,9 @@ import {
   Store,
   ClipboardCheck,
   IndianRupee,
-  ShieldCheck
+  ShieldCheck,
+  ClipboardList,
+  RefreshCw
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import Dashboard from './components/Dashboard';
@@ -56,6 +58,7 @@ import CattleManagement from './components/CattleManagement';
 import Login from './components/Login';
 import Settings from './components/Settings';
 import VendorManagement from './components/VendorManagement';
+import VendorRequests from './components/VendorRequests';
 import WorkerManagement from './components/WorkerManagement';
 import WorkerAttendance from './components/WorkerAttendance';
 import WorkerSalary from './components/WorkerSalary';
@@ -63,7 +66,8 @@ import WorkerReport from './components/WorkerReport';
 import UserManual from './components/UserManual';
 
 
-type View = 'dashboard' | 'customers' | 'entries' | 'advances' | 'feed' | 'cattle' | 'settings' | 'vendors' | 'workers' | 'attendance' | 'salary' | 'my-reports' | 'manual';
+type View = 'dashboard' | 'customers' | 'entries' | 'advances' | 'feed' | 'cattle' | 'settings' | 'vendors' | 'vendor-requests' | 'workers' | 'attendance' | 'salary' | 'my-reports' | 'manual';
+
 
 
 export default function App() {
@@ -123,6 +127,7 @@ export default function App() {
   const [isVerifying, setIsVerifying] = useState(true);
   const [serverStatus, setServerStatus] = useState<'checking' | 'starting' | 'ready'>('checking');
   const [errorMsg, setErrorMsg] = useState('');
+  const [isUpdatingApp, setIsUpdatingApp] = useState(false);
 
   const { t } = useTranslation();
 
@@ -132,6 +137,23 @@ export default function App() {
     setIsProfileOpen(false);
     setIsSidebarOpen(true);
     setAuthData({ token: null, role: null });
+  };
+
+  const handleAppUpdate = async () => {
+    if (isUpdatingApp) return;
+    setIsUpdatingApp(true);
+    try {
+      if ('serviceWorker' in navigator) {
+        const registrations = await navigator.serviceWorker.getRegistrations();
+        await Promise.all(registrations.map((registration) => registration.unregister()));
+      }
+      if ('caches' in window) {
+        const cacheKeys = await caches.keys();
+        await Promise.all(cacheKeys.map((cacheKey) => caches.delete(cacheKey)));
+      }
+    } finally {
+      window.location.reload();
+    }
   };
 
   useEffect(() => {
@@ -405,6 +427,7 @@ export default function App() {
   const navItems = [
     ...(authData.role === 'admin' ? [
       { id: 'vendors', label: navLabel('vendors', 'Vendors'), icon: Store },
+      { id: 'vendor-requests', label: 'Pending Requests', icon: ClipboardList },
       { id: 'customers', label: navLabel('farmers', 'Farmers'), icon: Users },
     ] : [
       { id: 'dashboard', label: navLabel('monitor', 'Monitor'), icon: LayoutDashboard },
@@ -501,16 +524,29 @@ export default function App() {
       {/* Main Content */}
       <main className="flex-1 overflow-auto relative glass-card flex flex-col">
         <header className="bg-white/90 backdrop-blur-xl border-b border-slate-100 px-3 py-3 md:px-10 md:py-5 sticky top-0 z-30 flex justify-between items-center shadow-soft">
-          <h1 className="text-[17px] md:text-3xl font-display font-bold text-slate-900 tracking-tight capitalize truncate max-w-[55vw] md:max-w-none">
-            {activeView === 'dashboard' ? t('dashboard') 
-              : activeView === 'customers' ? t('farmers')
-              : activeView === 'entries' ? t('milkSupply')
-              : activeView === 'advances' ? t('advances')
-              : activeView === 'feed' ? t('cattleFeed')
-              : activeView === 'cattle' ? (t('cattleManagement') || 'Farm & Cattle')
-              : activeView === 'settings' ? t('settings')
-              : (activeView as string).replace('-', ' ')}
-          </h1>
+          <div className="flex items-center gap-3 min-w-0">
+            <h1 className="text-[17px] md:text-3xl font-display font-bold text-slate-900 tracking-tight capitalize truncate max-w-[42vw] md:max-w-none">
+              {activeView === 'dashboard' ? t('dashboard') 
+                : activeView === 'customers' ? t('farmers')
+                : activeView === 'entries' ? t('milkSupply')
+                : activeView === 'advances' ? t('advances')
+                : activeView === 'feed' ? t('cattleFeed')
+                : activeView === 'cattle' ? (t('cattleManagement') || 'Farm & Cattle')
+                : activeView === 'vendor-requests' ? 'Pending Vendor Requests'
+                : activeView === 'settings' ? t('settings')
+                : (activeView as string).replace('-', ' ')}
+            </h1>
+            <button
+              type="button"
+              onClick={handleAppUpdate}
+              disabled={isUpdatingApp}
+              className="inline-flex items-center gap-1.5 rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-[10px] font-black uppercase tracking-wide text-amber-700 transition-colors hover:bg-amber-100 disabled:cursor-wait disabled:opacity-70 md:px-3"
+              title="Update the app"
+            >
+              <RefreshCw size={13} className={isUpdatingApp ? 'animate-spin' : ''} />
+              <span>{isUpdatingApp ? 'Updating...' : 'Update app'}</span>
+            </button>
+          </div>
           
           <div className="flex items-center gap-2 md:gap-6 relative">
             <div className="text-right hidden sm:block">
@@ -630,8 +666,11 @@ export default function App() {
               }}
             >
               {activeView === 'dashboard' && <Dashboard customerId={authData.customerId} vendorId={authData.vendorId} workerId={authData.workerId} onNavigate={setActiveView} />}
-              {activeView === 'manual' && <UserManual userRole={authData.role} />}
-              {activeView === 'vendors' && authData.role === 'admin' && <VendorManagement />}
+              {activeView === 'manual' && <UserManual userRole={authData.role ?? undefined} />}
+              {activeView === 'vendors' && authData.role === 'admin' && (
+                <VendorManagement onNavigateToRequests={() => setActiveView('vendor-requests')} />
+              )}
+              {activeView === 'vendor-requests' && authData.role === 'admin' && <VendorRequests />}
               {activeView === 'workers' && authData.role === 'vendor' && <WorkerManagement vendorId={authData.vendorId} />}
               {activeView === 'attendance' && authData.role === 'vendor' && <WorkerAttendance vendorId={authData.vendorId} />}
               {activeView === 'salary' && authData.role === 'vendor' && <WorkerSalary vendorId={authData.vendorId} />}

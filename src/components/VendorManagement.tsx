@@ -2,9 +2,10 @@ import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   Store, Users, Milk, Plus, Edit2, Trash2, X, Eye, EyeOff,
-  Phone, MapPin, TrendingUp, ChevronDown, AlertTriangle, Search, ShieldCheck
+  Phone, MapPin, TrendingUp, ChevronDown, AlertTriangle, Search, ShieldCheck, ClipboardList
 } from 'lucide-react';
 import { apiFetch } from '../api';
+
 
 interface Vendor {
   id: number;
@@ -27,8 +28,9 @@ interface OverviewData {
 
 const emptyForm = { name: '', username: '', password: '', phone: '', address: '' };
 
-export default function VendorManagement() {
+export default function VendorManagement({ onNavigateToRequests }: { onNavigateToRequests?: () => void }) {
   const [overview, setOverview] = useState<OverviewData | null>(null);
+  const [pendingCount, setPendingCount] = useState<number>(0);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [showModal, setShowModal] = useState(false);
@@ -49,7 +51,19 @@ export default function VendorManagement() {
     } finally {
       setLoading(false);
     }
+
+    try {
+      const statsRes = await apiFetch<{ success: boolean; stats: { pending: number } }>('/api/admin/vendor-requests-stats', {
+        headers: { Authorization: 'Bearer admin-token' }
+      });
+      if (statsRes.success) {
+        setPendingCount(statsRes.stats.pending || 0);
+      }
+    } catch (e) {
+      console.error('Failed to fetch request stats', e);
+    }
   };
+
 
   useEffect(() => { fetchOverview(); }, []);
 
@@ -131,16 +145,18 @@ export default function VendorManagement() {
   return (
     <div className="space-y-6">
       {/* Header Stats */}
-      <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         {[
           { label: 'Total Vendors', value: overview?.totalVendors ?? '—', icon: Store, color: 'emerald' },
           { label: 'Total Farmers', value: overview?.totalCustomers ?? '—', icon: Users, color: 'blue' },
-          { label: 'Unassigned', value: overview?.unassignedCustomers ?? '—', icon: AlertTriangle, color: 'amber' },
+          { label: 'Unassigned', value: overview?.unassignedCustomers ?? '—', icon: AlertTriangle, color: 'rose' },
+          { label: 'Pending Requests', value: pendingCount, icon: ClipboardList, color: 'amber', onClick: onNavigateToRequests },
         ].map(stat => {
           const Icon = stat.icon;
           const colors: Record<string, string> = {
             emerald: 'bg-emerald-50 text-emerald-600',
             blue: 'bg-blue-50 text-blue-600',
+            rose: 'bg-rose-50 text-rose-600',
             amber: 'bg-amber-50 text-amber-600',
           };
           return (
@@ -148,10 +164,18 @@ export default function VendorManagement() {
               key={stat.label}
               initial={{ opacity: 0, y: 16 }}
               animate={{ opacity: 1, y: 0 }}
-              className="bg-white rounded-2xl p-5 border border-slate-100 shadow-soft"
+              onClick={stat.onClick}
+              className={`bg-white rounded-2xl p-5 border border-slate-100 shadow-soft ${stat.onClick ? 'cursor-pointer hover:border-amber-300 hover:shadow-md transition-all' : ''}`}
             >
-              <div className={`w-10 h-10 rounded-xl flex items-center justify-center mb-3 ${colors[stat.color]}`}>
-                <Icon size={20} />
+              <div className="flex items-center justify-between mb-3">
+                <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${colors[stat.color]}`}>
+                  <Icon size={20} />
+                </div>
+                {stat.label === 'Pending Requests' && pendingCount > 0 && (
+                  <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800 animate-pulse">
+                    Action Required
+                  </span>
+                )}
               </div>
               <p className="text-2xl font-bold text-slate-900">{loading ? '—' : stat.value}</p>
               <p className="text-xs text-slate-500 font-medium mt-0.5">{stat.label}</p>
@@ -172,16 +196,35 @@ export default function VendorManagement() {
             className="w-full pl-9 pr-4 py-2.5 bg-white border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/30 focus:border-emerald-400 transition-all"
           />
         </div>
-        <motion.button
-          whileHover={{ scale: 1.02 }}
-          whileTap={{ scale: 0.98 }}
-          onClick={openAdd}
-          className="flex items-center gap-2 px-5 py-2.5 bg-emerald-600 text-white rounded-xl font-semibold text-sm shadow-lg shadow-emerald-100 hover:bg-emerald-700 transition-colors"
-        >
-          <Plus size={18} />
-          Add Vendor
-        </motion.button>
+        <div className="flex items-center gap-2">
+          {onNavigateToRequests && (
+            <motion.button
+              whileHover={{ scale: 1.02 }}
+              whileTap={{ scale: 0.98 }}
+              onClick={onNavigateToRequests}
+              className="flex items-center gap-2 px-4 py-2.5 bg-amber-50 border border-amber-200 text-amber-800 rounded-xl font-semibold text-sm hover:bg-amber-100 transition-colors"
+            >
+              <ClipboardList size={18} className="text-amber-600" />
+              <span>Pending Requests</span>
+              {pendingCount > 0 && (
+                <span className="px-1.5 py-0.5 text-xs font-bold bg-amber-500 text-white rounded-full leading-none">
+                  {pendingCount}
+                </span>
+              )}
+            </motion.button>
+          )}
+          <motion.button
+            whileHover={{ scale: 1.02 }}
+            whileTap={{ scale: 0.98 }}
+            onClick={openAdd}
+            className="flex items-center gap-2 px-5 py-2.5 bg-emerald-600 text-white rounded-xl font-semibold text-sm shadow-lg shadow-emerald-100 hover:bg-emerald-700 transition-colors"
+          >
+            <Plus size={18} />
+            Add Vendor
+          </motion.button>
+        </div>
       </div>
+
 
       {/* Vendor Cards */}
       {loading ? (

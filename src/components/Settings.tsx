@@ -141,28 +141,48 @@ export default function Settings({ authData, onLogout, onProfileUpdate }: Settin
                           onChange={async (e) => {
                             const file = e.target.files?.[0];
                             if (!file) return;
-                            
-                            // Convert image to base64
-                            const reader = new FileReader();
-                            reader.onloadend = async () => {
-                              const base64String = reader.result as string;
-                              try {
-                                const response = await fetch('/api/profile/picture', {
-                                  method: 'PUT',
-                                  headers: {
-                                    'Content-Type': 'application/json',
-                                    'Authorization': `Bearer ${localStorage.getItem('dairy_auth_token')}`
-                                  },
-                                  body: JSON.stringify({ profilePicture: base64String }),
-                                });
-                                if (response.ok && onProfileUpdate) {
-                                  onProfileUpdate(base64String);
-                                }
-                              } catch (err) {
-                                console.error("Error uploading profile photo:", err);
+
+                            try {
+                              const base64String = await new Promise<string>((resolve, reject) => {
+                                const reader = new FileReader();
+                                reader.onload = () => resolve(reader.result as string);
+                                reader.onerror = () => reject(reader.error);
+                                reader.readAsDataURL(file);
+                              });
+                              const image = await new Promise<HTMLImageElement>((resolve, reject) => {
+                                const image = new Image();
+                                image.onload = () => resolve(image);
+                                image.onerror = () => reject(new Error('Unable to read image'));
+                                image.src = base64String;
+                              });
+                              const maxDimension = 1024;
+                              const scale = Math.min(1, maxDimension / Math.max(image.naturalWidth, image.naturalHeight));
+                              const canvas = document.createElement('canvas');
+                              canvas.width = Math.max(1, Math.round(image.naturalWidth * scale));
+                              canvas.height = Math.max(1, Math.round(image.naturalHeight * scale));
+                              const context = canvas.getContext('2d');
+                              if (!context) throw new Error('Unable to prepare image');
+                              context.drawImage(image, 0, 0, canvas.width, canvas.height);
+                              const optimizedPicture = canvas.toDataURL('image/jpeg', 0.85);
+
+                              const response = await fetch('/api/profile/picture', {
+                                method: 'PUT',
+                                headers: {
+                                  'Content-Type': 'application/json',
+                                  'Authorization': `Bearer ${localStorage.getItem('dairy_auth_token')}`
+                                },
+                                body: JSON.stringify({ profilePicture: optimizedPicture }),
+                              });
+                              const result = await response.json().catch(() => null);
+                              if (!response.ok || !result?.success) {
+                                throw new Error(result?.message || 'Profile photo upload failed');
                               }
-                            };
-                            reader.readAsDataURL(file);
+                              onProfileUpdate?.(optimizedPicture);
+                            } catch (err) {
+                              console.error("Error uploading profile photo:", err);
+                            } finally {
+                              e.currentTarget.value = '';
+                            }
                           }}
                         />
                       </label>

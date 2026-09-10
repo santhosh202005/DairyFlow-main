@@ -177,4 +177,16 @@ export interface CattleVaccination {
   created_at: string;
 }
 
+export interface VendorRequest {
+  id: string;
+  vendor_name: string;
+  address?: string;
+  phone?: string;
+  email: string;
+  requested_username: string;
+  status: 'pending' | 'approved' | 'rejected';
+  admin_note?: string;
+  created_at: string;
+  reviewed_at?: string;
+}
 

@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
-import { Lock, User, LogIn, AlertCircle, Phone, Smartphone, ArrowRight, KeyRound, Eye, EyeOff, Store, CheckCircle2 } from 'lucide-react';
+import { Lock, User, LogIn, AlertCircle, Phone, Smartphone, ArrowRight, KeyRound, Eye, EyeOff, Store, CheckCircle2, Mail, MapPin, Send, ClipboardList } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useTranslation } from '../i18n';
+
 
 interface LoginProps {
   onLogin: (
@@ -57,6 +58,11 @@ export default function Login({ onLogin }: LoginProps) {
   const [showAdminTab, setShowAdminTab] = useState(false);
   const [logoClicks, setLogoClicks] = useState(0);
 
+  // Vendor Access Request form
+  const [vendorRequestMode, setVendorRequestMode] = useState(false);
+  const [vrForm, setVrForm] = useState({ vendor_name: '', address: '', phone: '', email: '', requested_username: '' });
+  const [vrSuccess, setVrSuccess] = useState(false);
+
   React.useEffect(() => {
     setForgotMode(null);
     setIsOtpSent(false);
@@ -102,6 +108,14 @@ export default function Login({ onLogin }: LoginProps) {
     setShowConfirmPassword(false);
   };
 
+  const clearVendorRequest = () => {
+    setVendorRequestMode(false);
+    setVrForm({ vendor_name: '', address: '', phone: '', email: '', requested_username: '' });
+    setVrSuccess(false);
+    setError('');
+    setMessage('');
+  };
+
   const switchTab = (type: LoginType) => {
     setLoginType(type);
     setUsername('');
@@ -110,6 +124,32 @@ export default function Login({ onLogin }: LoginProps) {
     setMessage('');
     setShowPassword(false);
     clearForgot();
+    clearVendorRequest();
+  };
+
+  const handleVendorRequest = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsLoading(true);
+    setError('');
+    setMessage('');
+    try {
+      const response = await fetch('/api/vendor-requests', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(vrForm),
+      });
+      const data = await response.json();
+      if (response.ok && data.success) {
+        setVrSuccess(true);
+        setMessage(data.message || 'Your vendor access request has been submitted!');
+      } else {
+        setError(data.message || 'Failed to submit request. Please try again.');
+      }
+    } catch (err) {
+      setError(`Something went wrong: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   const handleLoginSubmit = async (e: React.FormEvent) => {
@@ -259,12 +299,12 @@ export default function Login({ onLogin }: LoginProps) {
           </div>
           <h2 className="text-2xl font-bold">{t('portalTitle')}</h2>
           <p className="text-emerald-100 text-sm mt-1">
-            {isForgotPassword ? 'Reset Password' : t('signInToYourAccount')}
+            {vendorRequestMode ? 'Request Vendor Access' : isForgotPassword ? 'Reset Password' : t('signInToYourAccount')}
           </p>
         </div>
 
         {/* Tab switcher — only on login */}
-        {!isForgotPassword && (
+        {!isForgotPassword && !vendorRequestMode && (
           <div className="flex border-b border-slate-100">
             <button onClick={() => switchTab('customer')}
               className={`flex-1 py-3.5 text-xs font-semibold transition-colors ${loginType === 'customer' ? 'text-emerald-600 border-b-2 border-emerald-600 bg-emerald-50/50' : 'text-slate-500 hover:text-slate-700 hover:bg-slate-50'}`}>
@@ -466,21 +506,113 @@ export default function Login({ onLogin }: LoginProps) {
             )}
 
             {/* ──────────────────────────────────────────
+                VENDOR ACCESS REQUEST FORM
+            ────────────────────────────────────────── */}
+            {vendorRequestMode && (
+              <motion.div key="vendor-request" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0 }}
+                className="space-y-5">
+                <div className="flex items-center gap-3 p-3 bg-emerald-50 border border-emerald-100 rounded-xl">
+                  <ClipboardList size={20} className="text-emerald-600 shrink-0" />
+                  <div>
+                    <p className="font-bold text-slate-800 text-sm">Request Vendor Access</p>
+                    <p className="text-xs text-slate-500">Fill in your details — admin will review and notify you via email</p>
+                  </div>
+                </div>
+
+                {vrSuccess ? (
+                  <div className="text-center py-6 space-y-3">
+                    <div className="w-16 h-16 bg-emerald-100 rounded-full flex items-center justify-center mx-auto">
+                      <CheckCircle2 size={32} className="text-emerald-600" />
+                    </div>
+                    <p className="text-emerald-700 font-bold">Request Submitted!</p>
+                    <p className="text-slate-500 text-sm">The admin will review your request and send an approval email to <strong>{vrForm.email}</strong>.</p>
+                    <button onClick={clearVendorRequest} className="text-sm text-emerald-600 hover:text-emerald-700 font-semibold underline underline-offset-2">
+                      ← Back to Login
+                    </button>
+                  </div>
+                ) : (
+                  <form onSubmit={handleVendorRequest} className="space-y-4">
+                    <div>
+                      <label className="block text-sm font-medium text-slate-700 mb-1.5 flex items-center gap-2">
+                        <Store size={15} /> Vendor / Business Name *
+                      </label>
+                      <input required type="text" value={vrForm.vendor_name} onChange={e => setVrForm(f => ({ ...f, vendor_name: e.target.value }))}
+                        placeholder="e.g. Rajan Dairy Center"
+                        className="w-full p-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 outline-none transition-all" />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-slate-700 mb-1.5 flex items-center gap-2">
+                        <User size={15} /> Requested Username *
+                      </label>
+                      <input required type="text" value={vrForm.requested_username} onChange={e => setVrForm(f => ({ ...f, requested_username: e.target.value }))}
+                        placeholder="e.g. rajan_dairy"
+                        className="w-full p-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 outline-none transition-all" />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-slate-700 mb-1.5 flex items-center gap-2">
+                        <Mail size={15} /> Email Address *
+                      </label>
+                      <input required type="email" value={vrForm.email} onChange={e => setVrForm(f => ({ ...f, email: e.target.value }))}
+                        placeholder="your@gmail.com"
+                        className="w-full p-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 outline-none transition-all" />
+                    </div>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-sm font-medium text-slate-700 mb-1.5 flex items-center gap-2">
+                          <Phone size={15} /> Phone
+                        </label>
+                        <input type="tel" value={vrForm.phone} onChange={e => setVrForm(f => ({ ...f, phone: e.target.value }))}
+                          placeholder="Mobile number"
+                          className="w-full p-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 outline-none transition-all" />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-slate-700 mb-1.5 flex items-center gap-2">
+                          <MapPin size={15} /> Address
+                        </label>
+                        <input type="text" value={vrForm.address} onChange={e => setVrForm(f => ({ ...f, address: e.target.value }))}
+                          placeholder="Location"
+                          className="w-full p-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 outline-none transition-all" />
+                      </div>
+                    </div>
+                    <button type="submit" disabled={isLoading}
+                      className="w-full bg-emerald-600 text-white py-4 rounded-xl font-bold hover:bg-emerald-700 transition-all shadow-lg shadow-emerald-600/20 flex items-center justify-center gap-2 disabled:opacity-70">
+                      {isLoading ? <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : <><Send size={18} /> Submit Request</>}
+                    </button>
+                  </form>
+                )}
+
+                {!vrSuccess && (
+                  <div className="text-center">
+                    <button onClick={clearVendorRequest} className="text-sm text-slate-500 hover:text-emerald-600 font-medium transition-colors">
+                      ← Back to Login
+                    </button>
+                  </div>
+                )}
+              </motion.div>
+            )}
+
+            {/* ──────────────────────────────────────────
                 NORMAL LOGIN FORM
             ────────────────────────────────────────── */}
-            {!isForgotPassword && (
+            {!isForgotPassword && !vendorRequestMode && (
               <motion.div key="login" initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0 }}>
                 <form onSubmit={handleLoginSubmit} className="space-y-6">
                   {loginType === 'vendor' && (
-                    <div className="flex items-start gap-3 p-3 bg-emerald-50 border border-emerald-100 rounded-xl text-sm text-emerald-700">
-                      <Store size={18} className="shrink-0 mt-0.5 text-emerald-600" />
-                      <span>Enter the <strong>username & password</strong> created for your vendor account by the admin.</span>
+                    <div className="space-y-2">
+                      <div className="flex items-start gap-3 p-3 bg-emerald-50 border border-emerald-100 rounded-xl text-sm text-emerald-700">
+                        <Store size={18} className="shrink-0 mt-0.5 text-emerald-600" />
+                        <span>Enter the <strong>username &amp; password</strong> created for your vendor account by the admin.</span>
+                      </div>
+                      <button type="button" onClick={() => { setError(''); setMessage(''); setVendorRequestMode(true); }}
+                        className="w-full flex items-center justify-center gap-2 py-2.5 border border-dashed border-emerald-300 rounded-xl text-sm text-emerald-600 hover:bg-emerald-50 font-semibold transition-all">
+                        <ClipboardList size={15} /> Don't have an account? Request Vendor Access
+                      </button>
                     </div>
                   )}
                   {loginType === 'worker' && (
                     <div className="flex items-start gap-3 p-3 bg-blue-50 border border-blue-100 rounded-xl text-sm text-blue-700">
                       <User size={18} className="shrink-0 mt-0.5 text-blue-600" />
-                      <span>Enter the <strong>username & password</strong> created for your worker account by the vendor.</span>
+                      <span>Enter the <strong>username &amp; password</strong> created for your worker account by the vendor.</span>
                     </div>
                   )}
 

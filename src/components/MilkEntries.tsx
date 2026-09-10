@@ -21,18 +21,55 @@ const monthNames = ['January','February','March','April','May','June','July','Au
 
 type SortBy = 'date' | 'customer';
 type SortDir = 'asc' | 'desc';
+type DisplayMilkEntry = MilkEntry & { syncStatus?: 'pending' };
+
+type PendingMilkEntry = {
+  queueId: string;
+  payload: {
+    customer_id: string;
+    date: string;
+    shift: 'AM' | 'PM';
+    liters: number;
+    rate?: number;
+    worker_id?: string;
+  };
+  displayEntry: DisplayMilkEntry;
+};
 
 const getAuthHeaders = (): Record<string, string> => {
   const token = localStorage.getItem('dairy_auth_token');
   return token ? { Authorization: `Bearer ${token}` } : {};
 };
 
+const getPendingQueueKey = () => {
+  const token = localStorage.getItem('dairy_auth_token');
+  return token ? `dairy_pending_milk_entries_${token}` : null;
+};
+
+const loadPendingEntries = (): PendingMilkEntry[] => {
+  const key = getPendingQueueKey();
+  if (!key) return [];
+  try {
+    const stored = JSON.parse(localStorage.getItem(key) || '[]');
+    return Array.isArray(stored) ? stored : [];
+  } catch {
+    return [];
+  }
+};
+
+const savePendingEntries = (pendingEntries: PendingMilkEntry[]) => {
+  const key = getPendingQueueKey();
+  if (!key) return;
+  localStorage.setItem(key, JSON.stringify(pendingEntries));
+};
+
 export default function MilkEntries({ customerId, vendorId, workerId, workerName, isAdmin = true, isVendor = false, isWorker = false, defaultRate }: MilkEntriesProps) {
   const { t } = useTranslation();
 
-  const [entries, setEntries] = useState<MilkEntry[]>([]);
+  const [entries, setEntries] = useState<DisplayMilkEntry[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [workers, setWorkers] = useState<any[]>([]);
+  const [pendingCount, setPendingCount] = useState(0);
 
   const [isLoadingEntries, setIsLoadingEntries] = useState(false);
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -87,6 +124,13 @@ export default function MilkEntries({ customerId, vendorId, workerId, workerName
     setPage(1);
   }, [selectedMonthKey, sortBy, sortDir, dateInMonth, paymentStatusFilter, pageSize, customerId]);
 
+  const getVisiblePendingEntries = () => {
+    const pending = loadPendingEntries();
+    return customerId
+      ? pending.filter((item) => item.displayEntry.customer_id === customerId.toString())
+      : pending;
+  };
+
   const fetchEntries = () => {
     setIsLoadingEntries(true);
     let url = '/api/entries';
@@ -94,16 +138,60 @@ export default function MilkEntries({ customerId, vendorId, workerId, workerName
     else if (vendorId) url = `/api/entries?vendorId=${vendorId}`;
     fetch(url, { headers: getAuthHeaders() })
       .then(res => res.json())
-      .then(data => setEntries(data))
+      .then(data => {
+        const pendingEntries = getVisiblePendingEntries();
+        setPendingCount(loadPendingEntries().length);
+        setEntries([...pendingEntries.map((item) => item.displayEntry), ...data]);
+      })
       .catch(() => {
-        // keep empty state
+        const pendingEntries = getVisiblePendingEntries();
+        setPendingCount(loadPendingEntries().length);
+        setEntries(pendingEntries.map((item) => item.displayEntry));
       })
       .finally(() => setIsLoadingEntries(false));
   };
 
-  useEffect(() => {
+  const syncPendingEntries = async () => {
+    if (!navigator.onLine) return;
+
+    const pendingEntries = loadPendingEntries();
+    if (pendingEntries.length === 0) {
+      setPendingCount(0);
+      return;
+    }
+
+    const remainingEntries: PendingMilkEntry[] = [];
+    for (const pendingEntry of pendingEntries) {
+      try {
+        const response = await fetch('/api/entries', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...getAuthHeaders(),
+          },
+          body: JSON.stringify(pendingEntry.payload),
+        });
+        const data = await response.json().catch(() => null);
+        const duplicateEntry = response.status === 400 && String(data?.message || '').toLowerCase().includes('already exists');
+        if (!response.ok && !duplicateEntry) {
+          remainingEntries.push(pendingEntry);
+        }
+      } catch {
+        remainingEntries.push(pendingEntry);
+      }
+    }
+
+    savePendingEntries(remainingEntries);
+    setPendingCount(remainingEntries.length);
     fetchEntries();
+  };
+
+  useEffect(() => {
+    syncPendingEntries().finally(fetchEntries);
     if (isAdmin || isVendor) fetchCustomers();
+    const handleOnline = () => { syncPendingEntries(); };
+    window.addEventListener('online', handleOnline);
+    return () => window.removeEventListener('online', handleOnline);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [customerId, vendorId, isAdmin, isVendor]);
 
@@ -167,37 +255,22 @@ export default function MilkEntries({ customerId, vendorId, workerId, workerName
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
-    const response = await fetch('/api/entries', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        ...getAuthHeaders()
-      },
-      body: JSON.stringify({
-        ...formData,
-        customer_id: formData.customer_id,
-        liters: parseFloat(formData.liters),
-        rate: formData.rate ? parseFloat(formData.rate) : undefined,
-        worker_id: formData.worker_id || undefined,
-      })
-    });
-
-    const data = await response.json();
-    if (!response.ok) {
-      setError(data.message || 'Failed to save entry');
-      return;
-    }
-
-    setIsModalOpen(false);
-    
     const customer = customers.find(c => c.id.toString() === formData.customer_id);
     const customerName = customer ? customer.name : '';
 
     const selectedWorker = workers.find(w => w.id.toString() === formData.worker_id);
     const selectedWorkerName = selectedWorker ? selectedWorker.name : (isWorker ? workerName : undefined);
 
-    const newEntry: MilkEntry = {
-      id: data.id || Date.now().toString(),
+    const payload: PendingMilkEntry['payload'] = {
+      customer_id: formData.customer_id,
+      date: formData.date,
+      shift: formData.shift,
+      liters: parseFloat(formData.liters),
+      rate: formData.rate ? parseFloat(formData.rate) : undefined,
+      worker_id: formData.worker_id || undefined,
+    };
+    const createDisplayEntry = (id: string, syncStatus?: 'pending'): DisplayMilkEntry => ({
+      id,
       customer_id: formData.customer_id,
       customer_name: customerName,
       date: formData.date,
@@ -207,8 +280,45 @@ export default function MilkEntries({ customerId, vendorId, workerId, workerName
       amount: parseFloat(formData.liters) * currentRate,
       worker_id: formData.worker_id || (isWorker ? workerId : undefined),
       worker_name: selectedWorkerName,
-      created_at: new Date().toISOString()
-    };
+      created_at: new Date().toISOString(),
+      syncStatus,
+    });
+
+    let response: Response;
+    try {
+      if (!navigator.onLine) throw new Error('offline');
+      response = await fetch('/api/entries', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...getAuthHeaders()
+        },
+        body: JSON.stringify(payload)
+      });
+      if (response.status >= 500) throw new Error('server unavailable');
+    } catch {
+      const pendingEntry: PendingMilkEntry = {
+        queueId: `offline-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+        payload,
+        displayEntry: createDisplayEntry(`offline-${Date.now()}`, 'pending'),
+      };
+      const pendingEntries = [...loadPendingEntries(), pendingEntry];
+      savePendingEntries(pendingEntries);
+      setPendingCount(pendingEntries.length);
+      setEntries(prev => [pendingEntry.displayEntry, ...prev]);
+      setIsModalOpen(false);
+      setFormData({ ...formData, customer_id: customerId ? customerId.toString() : '', liters: '', worker_id: '' });
+      return;
+    }
+
+    const data = await response.json().catch(() => null);
+    if (!response.ok) {
+      setError(data?.message || 'Failed to save entry');
+      return;
+    }
+
+    setIsModalOpen(false);
+    const newEntry = createDisplayEntry(data?.id || Date.now().toString());
 
     setEntries(prev => [newEntry, ...prev]);
     setFormData({ ...formData, customer_id: customerId ? customerId.toString() : '', liters: '', worker_id: '' });
@@ -250,6 +360,7 @@ export default function MilkEntries({ customerId, vendorId, workerId, workerName
       date: string;
       customer_id: string;
       customer_name: string;
+      pending: boolean;
       morningLiters: number;
       eveningLiters: number;
       rate: number;
@@ -269,6 +380,7 @@ export default function MilkEntries({ customerId, vendorId, workerId, workerName
         date: e.date,
         customer_id: e.customer_id,
         customer_name: e.customer_name || '',
+        pending: false,
         morningLiters: 0,
         eveningLiters: 0,
         rate,
@@ -285,6 +397,7 @@ export default function MilkEntries({ customerId, vendorId, workerId, workerName
       }
 
       row.rate = row.rate || rate;
+      row.pending = row.pending || e.syncStatus === 'pending';
       row.totalLiters = row.morningLiters + row.eveningLiters;
       row.totalAmount = row.totalLiters * row.rate;
 
@@ -379,6 +492,13 @@ export default function MilkEntries({ customerId, vendorId, workerId, workerName
             </div>
           </div>
         </div>
+
+        {pendingCount > 0 && (
+          <div className="flex items-center gap-2 rounded-xl border border-amber-100 bg-amber-50 px-3 py-2 text-xs font-bold text-amber-700">
+            <span className="h-2 w-2 rounded-full bg-amber-500 animate-pulse" />
+            {pendingCount} milk {pendingCount === 1 ? 'entry is' : 'entries are'} saved on this device and will sync when you are online.
+          </div>
+        )}
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
           <div className="flex gap-3 md:col-span-1">
@@ -556,6 +676,11 @@ export default function MilkEntries({ customerId, vendorId, workerId, workerName
                   </td>
                   <td className="px-4 md:px-10 py-3 md:py-6">
                     <p className="font-bold text-slate-700 text-xs md:text-sm tracking-tight truncate max-w-[120px] md:max-w-none">{row.customer_name}</p>
+                    {row.pending && (
+                      <span className="inline-flex items-center gap-1 text-[10px] font-bold text-amber-700 bg-amber-50 px-2 py-0.5 rounded-full mt-1 border border-amber-100">
+                        Pending sync
+                      </span>
+                    )}
                     {row.workers && row.workers.length > 0 ? (
                       <span className="inline-flex items-center gap-1 text-[10px] font-bold text-blue-700 bg-blue-50 px-2 py-0.5 rounded-full mt-1 border border-blue-100/50">
                         👷 {row.workers.join(', ')}

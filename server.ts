@@ -5,6 +5,8 @@ import { createClient } from "@libsql/client";
 import path from "path";
 import { fileURLToPath } from "url";
 import fs from "fs";
+import nodemailer from "nodemailer";
+
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -278,6 +280,23 @@ async function initDB() {
   } catch (_) {}
   try { await db.execute('CREATE INDEX IF NOT EXISTS idx_worker_credits_worker_id ON worker_credits(worker_id)'); } catch (_) {}
 
+  // Vendor access requests table
+  try {
+    await db.execute(`CREATE TABLE IF NOT EXISTS vendor_requests (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      vendor_name TEXT NOT NULL,
+      address TEXT,
+      phone TEXT,
+      email TEXT NOT NULL,
+      requested_username TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'pending',
+      admin_note TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      reviewed_at DATETIME
+    )`);
+  } catch (_) {}
+  try { await db.execute('CREATE INDEX IF NOT EXISTS idx_vendor_requests_status ON vendor_requests(status)'); } catch (_) {}
+
   // Sync again after DDL setup to ensure the local replica has all schemas up-to-date
   if (isRemote && typeof db.sync === "function") {
     try {
@@ -397,7 +416,275 @@ async function startServer() {
     res.json(statements);
   });
 
+
+  // ─── VENDOR ACCESS REQUESTS ─────────────────────────────────────────────────
+
+  // Helper: create nodemailer transporter
+  const createEmailTransporter = () => {
+    const user = (process.env.EMAIL_USER || "").trim();
+    const rawPass = (process.env.EMAIL_PASS || "").trim();
+    const pass = rawPass.replace(/\s+/g, ""); // strip any spaces in app password
+    if (!user || !pass || user.includes("your_") || pass.includes("your_")) {
+      console.warn(`[Email] EMAIL_USER or EMAIL_PASS not properly configured in .env (user=${user})`);
+      return null;
+    }
+    return nodemailer.createTransport({
+      service: "gmail",
+      auth: { user, pass },
+    });
+  };
+
+  const sendMailWithRetry = async (transporter: any, mailOptions: any, maxRetries = 2) => {
+    let lastErr: any = null;
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        return await transporter.sendMail(mailOptions);
+      } catch (err: any) {
+        lastErr = err;
+        console.warn(`[Email] Attempt ${attempt} failed: ${err.message}.`);
+        if (attempt < maxRetries) {
+          await new Promise(r => setTimeout(r, 2000));
+        }
+      }
+    }
+    throw lastErr;
+  };
+
+
+
+  // POST /api/vendor-requests — public endpoint to submit a vendor access request
+  app.post("/api/vendor-requests", async (req, res) => {
+    const { vendor_name, address, phone, email, requested_username } = req.body;
+    if (!vendor_name?.trim() || !email?.trim() || !requested_username?.trim()) {
+      return res.status(400).json({ success: false, message: "Vendor name, email, and requested username are required." });
+    }
+    try {
+      // Check if username is already taken
+      const existing = await db.execute({ sql: "SELECT id FROM vendors WHERE username = ? COLLATE NOCASE", args: [requested_username.trim()] });
+      if (existing.rows.length > 0) {
+        return res.status(409).json({ success: false, message: "That username is already taken. Please choose a different one." });
+      }
+      // Check for duplicate pending request with same email
+      const dupReq = await db.execute({ sql: "SELECT id FROM vendor_requests WHERE email = ? AND status = 'pending'", args: [email.trim()] });
+      if (dupReq.rows.length > 0) {
+        return res.status(409).json({ success: false, message: "A pending request with this email already exists. Please wait for admin review." });
+      }
+      await db.execute({
+        sql: "INSERT INTO vendor_requests (vendor_name, address, phone, email, requested_username) VALUES (?, ?, ?, ?, ?)",
+        args: [vendor_name.trim(), address?.trim() || null, phone?.trim() || null, email.trim(), requested_username.trim()],
+      });
+      console.log(`[VendorRequest] New request submitted by: ${email.trim()}`);
+      return res.json({ success: true, message: "Your vendor access request has been submitted! The admin will review and notify you via email." });
+    } catch (err) {
+      console.error("[VendorRequest] Submit error:", err);
+      return res.status(500).json({ success: false, message: "Internal server error. Please try again." });
+    }
+  });
+
+  // Admin middleware helper
+  const requireAdmin = (req: any, res: any, next: any) => {
+    const auth = req.headers.authorization;
+    if (!auth || auth !== "Bearer admin-token") {
+      return res.status(401).json({ success: false, message: "Unauthorized" });
+    }
+    next();
+  };
+
+  // GET /api/admin/vendor-requests — list all vendor requests
+  app.get("/api/admin/vendor-requests", requireAdmin, async (_req, res) => {
+    try {
+      const result = await db.execute("SELECT * FROM vendor_requests ORDER BY created_at DESC");
+      return res.json({ success: true, requests: result.rows });
+    } catch (err) {
+      console.error("[VendorRequest] List error:", err);
+      return res.status(500).json({ success: false, message: "Internal server error" });
+    }
+  });
+
+  // GET /api/admin/vendor-requests/:id — get single request
+  app.get("/api/admin/vendor-requests/:id", requireAdmin, async (req, res) => {
+    try {
+      const result = await db.execute({ sql: "SELECT * FROM vendor_requests WHERE id = ?", args: [req.params.id] });
+      if (!result.rows[0]) return res.status(404).json({ success: false, message: "Request not found" });
+      return res.json({ success: true, request: result.rows[0] });
+    } catch (err) {
+      console.error("[VendorRequest] Get error:", err);
+      return res.status(500).json({ success: false, message: "Internal server error" });
+    }
+  });
+
+  // PUT /api/admin/vendor-requests/:id — edit request fields
+  app.put("/api/admin/vendor-requests/:id", requireAdmin, async (req, res) => {
+    const { vendor_name, address, phone, email, requested_username } = req.body;
+    try {
+      const existing = await db.execute({ sql: "SELECT * FROM vendor_requests WHERE id = ?", args: [req.params.id] });
+      if (!existing.rows[0]) return res.status(404).json({ success: false, message: "Request not found" });
+      await db.execute({
+        sql: "UPDATE vendor_requests SET vendor_name=?, address=?, phone=?, email=?, requested_username=? WHERE id=?",
+        args: [
+          vendor_name?.trim() || (existing.rows[0] as any).vendor_name,
+          address?.trim() || null,
+          phone?.trim() || null,
+          email?.trim() || (existing.rows[0] as any).email,
+          requested_username?.trim() || (existing.rows[0] as any).requested_username,
+          req.params.id,
+        ],
+      });
+      return res.json({ success: true, message: "Request updated successfully." });
+    } catch (err) {
+      console.error("[VendorRequest] Edit error:", err);
+      return res.status(500).json({ success: false, message: "Internal server error" });
+    }
+  });
+
+  // PUT /api/admin/vendor-requests/:id/approve — approve request, create vendor, send email
+  app.put("/api/admin/vendor-requests/:id/approve", requireAdmin, async (req, res) => {
+    try {
+      const result = await db.execute({ sql: "SELECT * FROM vendor_requests WHERE id = ?", args: [req.params.id] });
+      const request = result.rows[0] as any;
+      if (!request) return res.status(404).json({ success: false, message: "Request not found" });
+      if (request.status === "approved") return res.status(400).json({ success: false, message: "Request is already approved." });
+
+      // Check username conflict
+      const usernameCheck = await db.execute({ sql: "SELECT id FROM vendors WHERE username = ? COLLATE NOCASE", args: [request.requested_username] });
+      if (usernameCheck.rows.length > 0) {
+        return res.status(409).json({ success: false, message: `Username "${request.requested_username}" is already taken. Edit the request first.` });
+      }
+
+      // Default password
+      const defaultPassword = `vendor@123`;
+
+      // Create vendor account
+      await db.execute({
+        sql: "INSERT INTO vendors (name, username, password, phone, address) VALUES (?, ?, ?, ?, ?)",
+        args: [request.vendor_name, request.requested_username, defaultPassword, request.phone || null, request.address || null],
+      });
+
+      // Mark request as approved
+      await db.execute({
+        sql: "UPDATE vendor_requests SET status='approved', reviewed_at=CURRENT_TIMESTAMP WHERE id=?",
+        args: [req.params.id],
+      });
+
+      // Send approval email
+      let emailNotice = "";
+      try {
+        const transporter = createEmailTransporter();
+        if (transporter) {
+          const senderUser = (process.env.EMAIL_USER || "").trim();
+          await sendMailWithRetry(transporter, {
+            from: `"DairyFlow" <${senderUser}>`,
+            to: request.email,
+            subject: "🎉 Your DairyFlow Vendor Account is Approved!",
+            html: `
+              <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; background: #f9fafb; border-radius: 12px;">
+                <div style="background: #059669; padding: 24px; border-radius: 10px 10px 0 0; text-align: center;">
+                  <h1 style="color: white; margin: 0; font-size: 24px;">🐄 DairyFlow</h1>
+                  <p style="color: #d1fae5; margin: 8px 0 0 0; font-size: 14px;">Vendor Account Approved</p>
+                </div>
+                <div style="background: white; padding: 32px; border-radius: 0 0 10px 10px; border: 1px solid #e5e7eb;">
+                  <h2 style="color: #111827; font-size: 20px; margin-top: 0;">Dear ${request.vendor_name},</h2>
+                  <p style="color: #374151; line-height: 1.6;">Congratulations! Your vendor account has been <strong style="color: #059669;">approved</strong>. You can now log in to DairyFlow and start managing your dairy operations.</p>
+                  
+                  <div style="background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 8px; padding: 16px; margin: 20px 0;">
+                    <p style="margin: 0 0 8px 0; font-weight: bold; color: #065f46;">Your Login Credentials:</p>
+                    <p style="margin: 4px 0; color: #374151;"><strong>Username:</strong> ${request.requested_username}</p>
+                    <p style="margin: 4px 0; color: #374151;"><strong>Password:</strong> ${defaultPassword}</p>
+                  </div>
+                  
+                  <p style="color: #6b7280; font-size: 13px; margin-top: 20px;">⚠️ Please change your password after your first login for security.</p>
+                  <p style="color: #6b7280; font-size: 13px;">If you have any questions, please contact the admin.</p>
+                  
+                  <p style="color: #374151; margin-top: 24px;">Best regards,<br><strong>DairyFlow Team</strong></p>
+                </div>
+              </div>
+            `,
+          });
+
+          console.log(`[VendorRequest] ✅ Approval email sent to: ${request.email}`);
+          emailNotice = `Approval email sent to ${request.email}.`;
+        } else {
+          console.warn("[VendorRequest] ⚠️ EMAIL_USER/EMAIL_PASS not configured. Skipping email.");
+          emailNotice = `(Note: Email was not sent because EMAIL_USER/EMAIL_PASS is not configured in .env)`;
+        }
+      } catch (emailErr: any) {
+        console.error("[VendorRequest] ❌ Email send error:", emailErr);
+        emailNotice = `(Warning: Account created, but email could not be delivered: ${emailErr.message || emailErr})`;
+      }
+
+      return res.json({ success: true, message: `Vendor account created for ${request.vendor_name}! ${emailNotice}` });
+
+    } catch (err) {
+      console.error("[VendorRequest] Approve error:", err);
+      return res.status(500).json({ success: false, message: "Internal server error" });
+    }
+  });
+
+  // PUT /api/admin/vendor-requests/:id/reject — reject request
+  app.put("/api/admin/vendor-requests/:id/reject", requireAdmin, async (req, res) => {
+    const { admin_note } = req.body;
+    try {
+      const result = await db.execute({ sql: "SELECT * FROM vendor_requests WHERE id = ?", args: [req.params.id] });
+      if (!result.rows[0]) return res.status(404).json({ success: false, message: "Request not found" });
+      await db.execute({
+        sql: "UPDATE vendor_requests SET status='rejected', admin_note=?, reviewed_at=CURRENT_TIMESTAMP WHERE id=?",
+        args: [admin_note?.trim() || null, req.params.id],
+      });
+
+      // Optionally send rejection email
+      const request = result.rows[0] as any;
+      try {
+        const transporter = createEmailTransporter();
+        if (transporter) {
+          const senderUser = (process.env.EMAIL_USER || "").trim();
+          await sendMailWithRetry(transporter, {
+            from: `"DairyFlow" <${senderUser}>`,
+            to: request.email,
+            subject: "DairyFlow — Vendor Access Request Update",
+            html: `
+              <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; background: #f9fafb; border-radius: 12px;">
+                <div style="background: #6b7280; padding: 24px; border-radius: 10px 10px 0 0; text-align: center;">
+                  <h1 style="color: white; margin: 0; font-size: 24px;">🐄 DairyFlow</h1>
+                </div>
+                <div style="background: white; padding: 32px; border-radius: 0 0 10px 10px; border: 1px solid #e5e7eb;">
+                  <h2 style="color: #111827; font-size: 20px; margin-top: 0;">Dear ${request.vendor_name},</h2>
+                  <p style="color: #374151; line-height: 1.6;">We regret to inform you that your vendor access request has not been approved at this time.</p>
+                  ${admin_note ? `<div style="background:#fef2f2;border:1px solid #fecaca;border-radius:8px;padding:16px;margin:20px 0;"><p style="margin:0;color:#991b1b;"><strong>Reason:</strong> ${admin_note}</p></div>` : ""}
+                  <p style="color: #374151;">You may submit a new request or contact the admin for more information.</p>
+                  <p style="color: #374151; margin-top: 24px;">Best regards,<br><strong>DairyFlow Team</strong></p>
+                </div>
+              </div>
+            `,
+          });
+        }
+
+      } catch (emailErr) {
+        console.error("[VendorRequest] Rejection email error:", emailErr);
+      }
+
+      return res.json({ success: true, message: "Request rejected." });
+    } catch (err) {
+      console.error("[VendorRequest] Reject error:", err);
+      return res.status(500).json({ success: false, message: "Internal server error" });
+    }
+  });
+
+  // GET /api/admin/vendor-requests/stats — count by status
+  app.get("/api/admin/vendor-requests-stats", requireAdmin, async (_req, res) => {
+    try {
+      const result = await db.execute("SELECT status, COUNT(*) as count FROM vendor_requests GROUP BY status");
+      const stats = { pending: 0, approved: 0, rejected: 0 };
+      for (const row of result.rows as any[]) {
+        if (row.status in stats) (stats as any)[row.status] = Number(row.count);
+      }
+      return res.json({ success: true, stats });
+    } catch (err) {
+      return res.status(500).json({ success: false, message: "Internal server error" });
+    }
+  });
+
   // ─── LOGIN ──────────────────────────────────────────────────────────────────
+
   app.post("/api/vendor/login", async (req, res) => {
     const { username: rawUsername, password } = req.body;
     const username = rawUsername?.trim();
