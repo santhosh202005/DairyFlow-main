@@ -525,7 +525,7 @@ export default function App() {
       <main className="flex-1 overflow-auto relative glass-card flex flex-col">
         <header className="bg-white/90 backdrop-blur-xl border-b border-slate-100 px-3 py-3 md:px-10 md:py-5 sticky top-0 z-30 flex justify-between items-center shadow-soft">
           <div className="flex items-center gap-3 min-w-0">
-            <h1 className="text-[17px] md:text-3xl font-display font-bold text-slate-900 tracking-tight capitalize truncate max-w-[42vw] md:max-w-none">
+            <h1 className="text-[17px] md:text-3xl font-display font-bold text-slate-900 tracking-tight capitalize truncate max-w-[35vw] md:max-w-none">
               {activeView === 'dashboard' ? t('dashboard') 
                 : activeView === 'customers' ? t('farmers')
                 : activeView === 'entries' ? t('milkSupply')
@@ -540,7 +540,7 @@ export default function App() {
               type="button"
               onClick={handleAppUpdate}
               disabled={isUpdatingApp}
-              className="inline-flex items-center gap-1.5 rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-[10px] font-black uppercase tracking-wide text-amber-700 transition-colors hover:bg-amber-100 disabled:cursor-wait disabled:opacity-70 md:px-3"
+              className="inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-[10px] font-black uppercase tracking-wide text-amber-700 transition-colors hover:bg-amber-100 disabled:cursor-wait disabled:opacity-70 md:px-3"
               title="Update the app"
             >
               <RefreshCw size={13} className={isUpdatingApp ? 'animate-spin' : ''} />
@@ -548,7 +548,7 @@ export default function App() {
             </button>
           </div>
           
-          <div className="flex items-center gap-2 md:gap-6 relative">
+          <div className="flex shrink-0 items-center gap-2 md:gap-6 relative">
             <div className="text-right hidden sm:block">
               <p className="text-sm font-bold text-slate-900 leading-none mb-1">
                 {authData.role === 'admin' ? 'Administrator' : authData.role === 'vendor' ? authData.vendorName : authData.role === 'worker' ? authData.workerName : authData.customerName}

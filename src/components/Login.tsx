@@ -327,6 +327,19 @@ export default function Login({ onLogin }: LoginProps) {
           </div>
         )}
 
+        {!isForgotPassword && !vendorRequestMode && (
+          <div className="px-6 pt-4 sm:px-8">
+            <button
+              type="button"
+              onClick={() => { setError(''); setMessage(''); setVendorRequestMode(true); }}
+              className="w-full flex items-center justify-center gap-2 rounded-xl border border-dashed border-emerald-300 bg-emerald-50/60 px-3 py-3 text-center text-sm font-semibold leading-snug text-emerald-700 transition-all hover:bg-emerald-50"
+            >
+              <ClipboardList size={16} className="shrink-0" />
+              <span>Need a vendor account? Request access from admin</span>
+            </button>
+          </div>
+        )}
+
         <div className="p-8">
           {/* Error */}
           <AnimatePresence>
@@ -603,10 +616,6 @@ export default function Login({ onLogin }: LoginProps) {
                         <Store size={18} className="shrink-0 mt-0.5 text-emerald-600" />
                         <span>Enter the <strong>username &amp; password</strong> created for your vendor account by the admin.</span>
                       </div>
-                      <button type="button" onClick={() => { setError(''); setMessage(''); setVendorRequestMode(true); }}
-                        className="w-full flex items-center justify-center gap-2 py-2.5 border border-dashed border-emerald-300 rounded-xl text-sm text-emerald-600 hover:bg-emerald-50 font-semibold transition-all">
-                        <ClipboardList size={15} /> Don't have an account? Request Vendor Access
-                      </button>
                     </div>
                   )}
                   {loginType === 'worker' && (
