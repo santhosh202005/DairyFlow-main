@@ -327,11 +327,11 @@ export default function Login({ onLogin }: LoginProps) {
           </div>
         )}
 
-        {!isForgotPassword && !vendorRequestMode && (
+        {!isForgotPassword && !vendorRequestMode && loginType === 'vendor' && (
           <div className="relative z-10 block px-5 pt-4 sm:px-8">
             <button
               type="button"
-              onClick={() => { setError(''); setMessage(''); setVendorRequestMode(true); }}
+              onClick={() => { setLoginType('vendor'); setError(''); setMessage(''); setVendorRequestMode(true); }}
               className="flex min-h-12 w-full items-center justify-center gap-2 rounded-xl border border-dashed border-emerald-300 bg-emerald-50/60 px-3 py-3 text-center text-sm font-semibold leading-snug text-emerald-700 transition-all hover:bg-emerald-50"
             >
               <ClipboardList size={16} className="shrink-0" />
