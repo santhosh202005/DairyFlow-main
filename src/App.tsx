@@ -540,7 +540,7 @@ export default function App() {
               type="button"
               onClick={handleAppUpdate}
               disabled={isUpdatingApp}
-              className="inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-[10px] font-black uppercase tracking-wide text-amber-700 transition-colors hover:bg-amber-100 disabled:cursor-wait disabled:opacity-70 md:px-3"
+              className="hidden shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-[10px] font-black uppercase tracking-wide text-amber-700 transition-colors hover:bg-amber-100 disabled:cursor-wait disabled:opacity-70 md:inline-flex md:px-3"
               title="Update the app"
             >
               <RefreshCw size={13} className={isUpdatingApp ? 'animate-spin' : ''} />
@@ -651,6 +651,18 @@ export default function App() {
             </AnimatePresence>
           </div>
         </header>
+
+        <div className="px-3 pt-3 md:hidden">
+          <button
+            type="button"
+            onClick={handleAppUpdate}
+            disabled={isUpdatingApp}
+            className="flex w-full items-center justify-center gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-3 text-xs font-black uppercase tracking-wide text-amber-700 transition-colors hover:bg-amber-100 disabled:cursor-wait disabled:opacity-70"
+          >
+            <RefreshCw size={15} className={isUpdatingApp ? 'animate-spin' : ''} />
+            <span>{isUpdatingApp ? 'Updating app...' : 'Update app to get the latest version'}</span>
+          </button>
+        </div>
 
         <div className="p-3 md:p-10 max-w-7xl mx-auto flex-1 mobile-bottom-padding">
           <AnimatePresence mode="wait">
