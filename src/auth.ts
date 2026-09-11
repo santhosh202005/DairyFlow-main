@@ -20,6 +20,11 @@ export type StoredAuth = {
   profilePicture?: string;
 };
 
+export type LoginAuth = Omit<StoredAuth, 'token' | 'role'> & {
+  token: string;
+  role: string;
+};
+
 const KEYS = {
   token: 'dairy_auth_token',
   role: 'dairy_auth_role',
@@ -85,6 +90,12 @@ export function loadStoredAuth(): StoredAuth | null {
 }
 
 export function storeAuth(auth: StoredAuth) {
+  console.log('[Auth] Storing authentication session:', {
+    role: auth.role,
+    tokenPresent: Boolean(auth.token),
+    vendorId: auth.vendorId,
+    vendorName: auth.vendorName,
+  });
   localStorage.setItem(KEYS.token, auth.token);
   localStorage.setItem(KEYS.role, auth.role);
 
@@ -135,6 +146,17 @@ export function storeAuth(auth: StoredAuth) {
 
   if (auth.profilePicture) localStorage.setItem(KEYS.profilePicture, auth.profilePicture);
   else localStorage.removeItem(KEYS.profilePicture);
+
+  const stored = loadStoredAuth();
+  if (!stored || stored.token !== auth.token || stored.role !== auth.role) {
+    throw new Error('Authentication session could not be verified after storage');
+  }
+  console.log('[Auth] Authentication session stored and verified:', {
+    role: stored.role,
+    tokenPresent: Boolean(stored.token),
+    vendorId: stored.vendorId,
+    vendorName: stored.vendorName,
+  });
 }
 
 export function clearAuth() {

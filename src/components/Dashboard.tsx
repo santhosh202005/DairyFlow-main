@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { Users, Milk, TrendingUp, AlertCircle, Package, Wallet } from 'lucide-react';
 import { useTranslation } from '../i18n';
 import { Stats } from '../types';
+import { loadStoredAuth } from '../auth';
 
 interface DashboardProps {
   customerId?: string;
@@ -15,13 +16,32 @@ export default function Dashboard({ customerId, vendorId, workerId, onNavigate }
   const { t } = useTranslation();
 
   useEffect(() => {
+    const storedAuth = loadStoredAuth();
+    console.log('[Dashboard] Authentication check:', {
+      tokenPresent: Boolean(storedAuth?.token),
+      role: storedAuth?.role,
+      vendorId: storedAuth?.vendorId,
+      vendorName: storedAuth?.vendorName,
+    });
+
+    if (!storedAuth?.token) {
+      console.warn('[Dashboard] Missing authentication session while loading dashboard.');
+      return;
+    }
+
     let url = '/api/stats';
     if (customerId) url = `/api/stats?customerId=${customerId}`;
     else if (vendorId) url = `/api/stats?vendorId=${vendorId}`;
     else if (workerId) url = `/api/stats?workerId=${workerId}`;
-    fetch(url)
-      .then(res => res.json())
-      .then(data => setStats(data));
+    fetch(url, { headers: { Authorization: `Bearer ${storedAuth.token}` } })
+      .then(async res => {
+        const data = await res.json();
+        console.log('[Dashboard] Stats response:', { status: res.status, ok: res.ok });
+        if (!res.ok) throw new Error(data?.message || `Dashboard request failed (${res.status})`);
+        return data;
+      })
+      .then(data => setStats(data))
+      .catch(err => console.error('[Dashboard] Stats load failed:', err));
   }, [customerId, vendorId, workerId]);
 
   if (!stats) return <div className="animate-pulse">Loading stats...</div>;

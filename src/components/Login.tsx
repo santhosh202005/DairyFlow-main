@@ -165,7 +165,19 @@ export default function Login({ onLogin }: LoginProps) {
         body: JSON.stringify({ username, password }),
       });
       const data = await response.json();
+      console.log('[Login] API response:', {
+        status: response.status,
+        ok: response.ok,
+        success: data?.success,
+        role: data?.role,
+        tokenPresent: Boolean(data?.token),
+        vendorId: data?.vendorId,
+        vendorName: data?.vendorName,
+      });
       if (response.ok && data.success) {
+        if (!data.token || !data.role) {
+          throw new Error('Login response is missing token or role');
+        }
         onLogin(
           data.token, data.role,
           data.customerId?.toString(), data.customerName, data.defaultRate,

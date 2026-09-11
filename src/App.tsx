@@ -5,7 +5,7 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { apiFetch } from './api';
-import { clearAuth, loadStoredAuth, storeAuth } from './auth';
+import { clearAuth, loadStoredAuth, storeAuth, type LoginAuth } from './auth';
 
 import { 
   LayoutDashboard, 
@@ -262,28 +262,15 @@ export default function App() {
             await apiFetch('/api/health', { method: 'GET' }, { retries: 6, delayMs: 1500 });
             if (loginGeneration.current !== verificationGeneration) return;
             console.log('[Auth] Backend health OK. Verifying session...');
-            await verifySession(token);
+            const isValid = await verifySession(token);
+            if (!isValid) {
+              redirectToLogin('session verification failed');
+            }
           })(),
           10_000
         );
 
         if (loginGeneration.current !== verificationGeneration) return;
-
-        // If verification succeeded, authData.token should be set by verifySession.
-        // If it didn't, treat as invalid/expired.
-        if (!loadStoredAuth()?.token) {
-          console.warn('[Auth] Token cleared during verification. Showing login.');
-          redirectToLogin('token cleared');
-          return;
-        }
-
-        // If verifySession didn't set authData, we still redirect to login.
-        // (Using current state is not reliable immediately, so we also accept a no-token final state.)
-        if (!token) {
-          console.warn('[Auth] No token available after verification. Showing login.');
-          redirectToLogin('no token after verification');
-          return;
-        }
 
         console.log('[Auth] Session verification flow completed.');
       } catch (err) {
@@ -354,9 +341,9 @@ export default function App() {
 
     // Persist and render immediately so the dashboard/redirect appears even if the
     // profile fetch is slow or temporarily unavailable.
-    storeAuth({
+    const loginAuth: LoginAuth = {
       token,
-      role: normalizedRole as any,
+      role: normalizedRole,
       customerId,
       customerName,
       customerCode,
@@ -372,9 +359,20 @@ export default function App() {
       workerId,
       workerName,
       workerPhone,
-    });
+    };
+    try {
+      storeAuth(loginAuth as any);
+    } catch (err) {
+      console.error('[Auth] Token storage failed:', err);
+      clearAuth();
+      setAuthData({ token: null, role: null });
+      setErrorMsg('Unable to save your login session. Please try again.');
+      return;
+    }
+    console.log('[Auth] Login accepted. Updating authentication state.');
     setAuthData(nextAuthData);
     setActiveView(normalizedRole === 'admin' ? 'vendors' : 'dashboard');
+    console.log('[Auth] Navigation selected:', normalizedRole === 'admin' ? 'vendors' : 'dashboard');
     setIsProfileOpen(false);
     setIsVerifying(false);
 
@@ -391,6 +389,8 @@ export default function App() {
       );
 
       if (me?.success) {
+        console.log('[Auth] Home session check succeeded:', { role: me.role, vendorId: me.vendorId, vendorName: me.vendorName });
+        storeAuth({ ...loginAuth, role: me.role, vendorId: me.vendorId?.toString(), vendorName: me.vendorName, vendorPhone: me.vendorPhone, vendorAddress: me.vendorAddress, profilePicture: me.profilePicture } as any);
         setAuthData({
           token,
           role: me.role,
@@ -410,7 +410,7 @@ export default function App() {
           workerName: me.workerName,
           workerPhone: me.workerPhone,
         });
-      }
+      } else console.warn('[Auth] Home session check returned an unsuccessful response:', me);
     } catch (err) {
       console.warn('[Auth] handleLogin profile refresh failed, keeping login payload state:', err);
     }
