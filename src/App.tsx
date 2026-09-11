@@ -323,9 +323,10 @@ export default function App() {
     workerName?: string,
     workerPhone?: string,
   ) => {
+    const normalizedRole = role.toLowerCase();
     const nextAuthData = {
       token,
-      role,
+      role: normalizedRole,
       customerId,
       customerName,
       customerCode,
@@ -347,7 +348,7 @@ export default function App() {
     // profile fetch is slow or temporarily unavailable.
     storeAuth({
       token,
-      role: role as any,
+      role: normalizedRole as any,
       customerId,
       customerName,
       customerCode,
@@ -365,8 +366,9 @@ export default function App() {
       workerPhone,
     });
     setAuthData(nextAuthData);
-    setActiveView(role === 'admin' ? 'vendors' : 'dashboard');
+    setActiveView(normalizedRole === 'admin' ? 'vendors' : 'dashboard');
     setIsProfileOpen(false);
+    setIsVerifying(false);
 
     // Then fetch the authoritative session profile to enrich any missing details.
     try {
