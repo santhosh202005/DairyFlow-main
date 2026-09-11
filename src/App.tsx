@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { apiFetch } from './api';
 import { clearAuth, loadStoredAuth, storeAuth } from './auth';
 
@@ -78,6 +78,7 @@ export default function App() {
   });
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [isProfileOpen, setIsProfileOpen] = useState(false);
+  const loginGeneration = useRef(0);
   
   const [authData, setAuthData] = useState<{
     token: string | null;
@@ -158,6 +159,7 @@ export default function App() {
 
   useEffect(() => {
     let didRun = false;
+    const verificationGeneration = loginGeneration.current;
 
     const withHardTimeout = async <T,>(promise: Promise<T>, ms: number): Promise<T> => {
       return await new Promise<T>((resolve, reject) => {
@@ -175,6 +177,7 @@ export default function App() {
     };
 
     const redirectToLogin = (reason: string) => {
+      if (loginGeneration.current !== verificationGeneration) return;
       console.warn('[Auth] redirectToLogin:', reason);
       clearAuth();
       setAuthData({ token: null, role: null });
@@ -215,6 +218,7 @@ export default function App() {
         );
 
         if (data?.success) {
+          if (loginGeneration.current !== verificationGeneration) return false;
           console.log('[Auth] Token valid.');
           setAuthData({
             token: sessionToken,
@@ -323,6 +327,7 @@ export default function App() {
     workerName?: string,
     workerPhone?: string,
   ) => {
+    loginGeneration.current += 1;
     const normalizedRole = role.toLowerCase();
     const nextAuthData = {
       token,
