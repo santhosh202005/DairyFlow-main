@@ -323,7 +323,28 @@ export default function App() {
     workerName?: string,
     workerPhone?: string,
   ) => {
-    // Persist what we have immediately so navigation feels instant.
+    const nextAuthData = {
+      token,
+      role,
+      customerId,
+      customerName,
+      customerCode,
+      defaultRate,
+      customerPhone,
+      customerAddress,
+      customerGender,
+      vendorId,
+      vendorName,
+      vendorPhone,
+      vendorAddress,
+      profilePicture,
+      workerId,
+      workerName,
+      workerPhone,
+    };
+
+    // Persist and render immediately so the dashboard/redirect appears even if the
+    // profile fetch is slow or temporarily unavailable.
     storeAuth({
       token,
       role: role as any,
@@ -343,8 +364,11 @@ export default function App() {
       workerName,
       workerPhone,
     });
+    setAuthData(nextAuthData);
+    setActiveView(role === 'admin' ? 'vendors' : 'dashboard');
+    setIsProfileOpen(false);
 
-    // Then fetch the authoritative session profile (so Settings/header always get full details).
+    // Then fetch the authoritative session profile to enrich any missing details.
     try {
       const me = await apiFetch<any>(
         '/api/auth/me',
@@ -376,17 +400,10 @@ export default function App() {
           workerName: me.workerName,
           workerPhone: me.workerPhone,
         });
-      } else {
-        // Fallback to the login payload if /api/auth/me doesn't return success.
-        setAuthData({ token, role, customerId, customerName, customerCode, defaultRate, customerPhone, customerAddress, customerGender, vendorId, vendorName, vendorPhone, vendorAddress, profilePicture, workerId, workerName, workerPhone });
       }
-    } catch {
-      // If backend is sleeping/slow, fallback immediately.
-      setAuthData({ token, role, customerId, customerName, customerCode, defaultRate, customerPhone, customerAddress, customerGender, vendorId, vendorName, vendorPhone, vendorAddress, profilePicture, workerId, workerName, workerPhone });
+    } catch (err) {
+      console.warn('[Auth] handleLogin profile refresh failed, keeping login payload state:', err);
     }
-
-    setActiveView(role === 'admin' ? 'vendors' : 'dashboard');
-    setIsProfileOpen(false);
   };
 
 

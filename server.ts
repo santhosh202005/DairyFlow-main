@@ -473,6 +473,51 @@ async function startServer() {
         sql: "INSERT INTO vendor_requests (vendor_name, address, phone, email, requested_username) VALUES (?, ?, ?, ?, ?)",
         args: [vendor_name.trim(), address?.trim() || null, phone?.trim() || null, email.trim(), requested_username.trim()],
       });
+
+      const requestDate = new Date().toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" });
+      const adminEmail = (process.env.ADMIN_EMAIL || process.env.EMAIL_USER || "").trim();
+      const senderUser = (process.env.EMAIL_USER || "").trim();
+
+      try {
+        const transporter = createEmailTransporter();
+        if (transporter && adminEmail) {
+          await sendMailWithRetry(transporter, {
+            from: `"DairyFlow" <${senderUser}>`,
+            to: adminEmail,
+            subject: "🔔 New Vendor Request – Approval Required",
+            html: `
+              <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; background: #f9fafb; border-radius: 12px;">
+                <div style="background: #0f172a; padding: 24px; border-radius: 10px 10px 0 0; text-align: center;">
+                  <h1 style="color: white; margin: 0; font-size: 24px;">🐄 DairyFlow</h1>
+                  <p style="color: #cbd5e1; margin: 8px 0 0 0; font-size: 14px;">New Vendor Request Awaiting Review</p>
+                </div>
+                <div style="background: white; padding: 32px; border-radius: 0 0 10px 10px; border: 1px solid #e5e7eb;">
+                  <p style="color: #374151; line-height: 1.6; margin-top: 0;">A new vendor has requested to join DairyFlow.</p>
+
+                  <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 16px; margin: 20px 0;">
+                    <p style="margin: 6px 0; color: #111827;"><strong>Vendor Name:</strong> ${vendor_name.trim()}</p>
+                    <p style="margin: 6px 0; color: #111827;"><strong>Owner:</strong> ${vendor_name.trim()}</p>
+                    <p style="margin: 6px 0; color: #111827;"><strong>Email:</strong> ${email.trim()}</p>
+                    <p style="margin: 6px 0; color: #111827;"><strong>Phone:</strong> ${phone?.trim() || "Not provided"}</p>
+                    <p style="margin: 6px 0; color: #111827;"><strong>Request Date:</strong> ${requestDate}</p>
+                  </div>
+
+                  <p style="color: #111827; font-size: 18px; font-weight: bold; margin: 16px 0 8px 0;">Status: Pending Approval</p>
+                  <p style="color: #374151; line-height: 1.6; margin: 0;">Please log in to the DairyFlow Admin Dashboard and review this vendor request.</p>
+
+                  <p style="color: #374151; margin-top: 24px;">Best regards,<br><strong>DairyFlow Team</strong></p>
+                </div>
+              </div>
+            `,
+          });
+          console.log(`[VendorRequest] Admin notification sent to: ${adminEmail}`);
+        } else {
+          console.warn("[VendorRequest] No admin email configured. Skipping vendor request notification.");
+        }
+      } catch (emailErr) {
+        console.error("[VendorRequest] Admin notification email error:", emailErr);
+      }
+
       console.log(`[VendorRequest] New request submitted by: ${email.trim()}`);
       return res.json({ success: true, message: "Your vendor access request has been submitted! The admin will review and notify you via email." });
     } catch (err) {
