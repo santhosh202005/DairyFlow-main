@@ -260,11 +260,14 @@ export default function App() {
           (async () => {
             console.log('[Auth] Checking backend health...');
             await apiFetch('/api/health', { method: 'GET' }, { retries: 6, delayMs: 1500 });
+            if (loginGeneration.current !== verificationGeneration) return;
             console.log('[Auth] Backend health OK. Verifying session...');
             await verifySession(token);
           })(),
           10_000
         );
+
+        if (loginGeneration.current !== verificationGeneration) return;
 
         // If verification succeeded, authData.token should be set by verifySession.
         // If it didn't, treat as invalid/expired.
