@@ -159,11 +159,15 @@ export default function Login({ onLogin }: LoginProps) {
     setMessage('');
     try {
       const loginUrl = loginType === 'vendor' ? '/api/vendor/login' : '/api/login';
+      const controller = new AbortController();
+      const timeout = window.setTimeout(() => controller.abort(), 20_000);
       const response = await fetch(loginUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ username, password }),
+        signal: controller.signal,
       });
+      window.clearTimeout(timeout);
       const data = await response.json();
       console.log('[Login] API response:', {
         status: response.status,
@@ -195,7 +199,10 @@ export default function Login({ onLogin }: LoginProps) {
       }
     } catch (err) {
       console.error('[Login.tsx] handleLoginSubmit error:', err);
-      setError(`Something went wrong: ${err instanceof Error ? err.message : String(err)}. Please check your connection.`);
+      const message = err instanceof DOMException && err.name === 'AbortError'
+        ? 'Login timed out. Please check your connection and try again.'
+        : `Something went wrong: ${err instanceof Error ? err.message : String(err)}. Please check your connection.`;
+      setError(message);
     } finally {
       setIsLoading(false);
     }

@@ -187,6 +187,14 @@ export default function App() {
       setIsVerifying(false);
     };
 
+    const keepStoredSession = (reason: string) => {
+      if (loginGeneration.current !== verificationGeneration) return;
+      console.warn('[Auth] Keeping stored session while backend is unavailable:', reason);
+      setServerStatus('starting');
+      setErrorMsg('Server is starting, please wait a few seconds...');
+      setIsVerifying(false);
+    };
+
     if (didRun) return;
     didRun = true;
 
@@ -204,7 +212,7 @@ export default function App() {
       return;
     }
 
-    const verifySession = async (sessionToken: string) => {
+    const verifySession = async (sessionToken: string): Promise<'valid' | 'invalid' | 'unavailable'> => {
       try {
         const data = await apiFetch<any>(
           '/api/auth/me',
@@ -218,7 +226,7 @@ export default function App() {
         );
 
         if (data?.success) {
-          if (loginGeneration.current !== verificationGeneration) return false;
+          if (loginGeneration.current !== verificationGeneration) return 'unavailable';
           console.log('[Auth] Token valid.');
           setAuthData({
             token: sessionToken,
@@ -239,14 +247,14 @@ export default function App() {
             workerName: data.workerName,
             workerPhone: data.workerPhone,
           });
-          return true;
+          return 'valid';
         }
 
         console.warn('[Auth] /api/auth/me responded but not success:', data);
-        return false;
+        return 'invalid';
       } catch (e) {
         console.error('[Auth] Token verification error:', e);
-        return false;
+        return String((e as any)?.message || e).includes('HTTP 401') ? 'invalid' : 'unavailable';
       }
     };
 
@@ -262,9 +270,11 @@ export default function App() {
             await apiFetch('/api/health', { method: 'GET' }, { retries: 6, delayMs: 1500 });
             if (loginGeneration.current !== verificationGeneration) return;
             console.log('[Auth] Backend health OK. Verifying session...');
-            const isValid = await verifySession(token);
-            if (!isValid) {
+            const sessionStatus = await verifySession(token);
+            if (sessionStatus === 'invalid') {
               redirectToLogin('session verification failed');
+            } else if (sessionStatus === 'unavailable') {
+              keepStoredSession('session verification unavailable');
             }
           })(),
           10_000
@@ -277,16 +287,12 @@ export default function App() {
         const msg = String((err as any)?.message || err);
         if (msg.includes('Hard timeout')) {
           console.warn('[Auth] Verification timed out (backend may be sleeping).');
-          setServerStatus('starting');
-          setErrorMsg('Server is starting, please wait a few seconds...');
-          redirectToLogin('verification timeout');
+          keepStoredSession('verification timeout');
           return;
         }
 
         console.warn('[Auth] Backend sleeping/unavailable:', err);
-        setServerStatus('starting');
-        setErrorMsg('Server is starting, please wait a few seconds...');
-        redirectToLogin('backend unavailable');
+        keepStoredSession('backend unavailable');
         return;
       } finally {
         // Guarantee loader off.
