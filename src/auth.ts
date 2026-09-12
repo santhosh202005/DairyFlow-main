@@ -144,8 +144,16 @@ export function storeAuth(auth: StoredAuth) {
   if (auth.workerPhone) localStorage.setItem(KEYS.workerPhone, auth.workerPhone);
   else localStorage.removeItem(KEYS.workerPhone);
 
-  if (auth.profilePicture) localStorage.setItem(KEYS.profilePicture, auth.profilePicture);
-  else localStorage.removeItem(KEYS.profilePicture);
+  // Profile images can be large base64 values and must never prevent login.
+  // Remove the previous image before attempting to store a new one.
+  localStorage.removeItem(KEYS.profilePicture);
+  if (auth.profilePicture && auth.profilePicture.length <= 200_000) {
+    try {
+      localStorage.setItem(KEYS.profilePicture, auth.profilePicture);
+    } catch (err) {
+      console.warn('[Auth] Profile image was not stored:', err);
+    }
+  }
 
   const stored = loadStoredAuth();
   if (!stored || stored.token !== auth.token || stored.role !== auth.role) {
