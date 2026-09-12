@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Lock, User, LogIn, AlertCircle, Phone, Smartphone, ArrowRight, KeyRound, Eye, EyeOff, Store, CheckCircle2, Mail, MapPin, Send, ClipboardList } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useTranslation } from '../i18n';
+import { storeAuth } from '../auth';
 
 
 interface LoginProps {
@@ -189,6 +190,20 @@ export default function Login({ onLogin }: LoginProps) {
         if (!data.token || !data.role) {
           throw new Error('Login response is missing token or role');
         }
+        if (data.role.toLowerCase() === 'vendor') {
+          storeAuth({
+            token: data.token,
+            role: 'vendor',
+            vendorId: data.vendorId?.toString(),
+            vendorName: data.vendorName,
+            vendorPhone: data.vendorPhone,
+            vendorAddress: data.vendorAddress,
+            profilePicture: data.profilePicture,
+          });
+          setIsLoading(false);
+          window.location.reload();
+          return;
+        }
         setIsLoading(false);
         await onLogin(
           data.token, data.role,
@@ -198,10 +213,6 @@ export default function Login({ onLogin }: LoginProps) {
           data.customerCode, data.profilePicture,
           data.workerId?.toString(), data.workerName, data.workerPhone,
         );
-        if (data.role?.toLowerCase() === 'vendor') {
-          window.location.replace(window.location.pathname);
-          return;
-        }
       } else {
         let msg = data.message || 'Invalid credentials. Please try again.';
         if (loginType === 'admin' && username.toLowerCase() === 'admin') {
