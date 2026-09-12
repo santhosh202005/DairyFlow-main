@@ -23,7 +23,7 @@ interface LoginProps {
     workerId?: string,
     workerName?: string,
     workerPhone?: string,
-  ) => void;
+  ) => void | Promise<void>;
 }
 
 type LoginType = 'customer' | 'admin' | 'vendor' | 'worker';
@@ -189,7 +189,8 @@ export default function Login({ onLogin }: LoginProps) {
         if (!data.token || !data.role) {
           throw new Error('Login response is missing token or role');
         }
-        onLogin(
+        setIsLoading(false);
+        await onLogin(
           data.token, data.role,
           data.customerId?.toString(), data.customerName, data.defaultRate,
           data.customerPhone, data.customerAddress, data.customerGender,
