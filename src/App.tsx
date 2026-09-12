@@ -212,6 +212,15 @@ export default function App() {
       return;
     }
 
+    // Vendor login already persisted the complete vendor profile. Do not block
+    // startup on the secondary session endpoint, which may be unavailable while
+    // the production backend is waking up.
+    if (stored?.role === 'vendor') {
+      console.log('[Auth] Restoring stored vendor session without blocking startup.');
+      setIsVerifying(false);
+      return;
+    }
+
     const verifySession = async (sessionToken: string): Promise<'valid' | 'invalid' | 'unavailable'> => {
       try {
         const data = await apiFetch<any>(
