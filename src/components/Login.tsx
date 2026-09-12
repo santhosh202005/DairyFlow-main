@@ -197,6 +197,10 @@ export default function Login({ onLogin }: LoginProps) {
           data.customerCode, data.profilePicture,
           data.workerId?.toString(), data.workerName, data.workerPhone,
         );
+        if (data.role?.toLowerCase() === 'vendor') {
+          window.location.replace(window.location.pathname);
+          return;
+        }
       } else {
         let msg = data.message || 'Invalid credentials. Please try again.';
         if (loginType === 'admin' && username.toLowerCase() === 'admin') {
