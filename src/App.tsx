@@ -125,7 +125,7 @@ export default function App() {
   // Keep `useIsMobile` call unconditional to preserve hook order across renders
   const isMobile = useIsMobile();
 
-  const [isVerifying, setIsVerifying] = useState(true);
+  const [isVerifying, setIsVerifying] = useState(() => !loadStoredAuth());
   const [serverStatus, setServerStatus] = useState<'checking' | 'starting' | 'ready'>('checking');
   const [errorMsg, setErrorMsg] = useState('');
   const [isUpdatingApp, setIsUpdatingApp] = useState(false);
@@ -381,6 +381,10 @@ export default function App() {
     console.log('[Auth] Navigation selected:', normalizedRole === 'admin' ? 'vendors' : 'dashboard');
     setIsProfileOpen(false);
     setIsVerifying(false);
+
+    // Vendor login already returns the complete dashboard identity. Do not make
+    // navigation wait for a second profile request to the production server.
+    if (normalizedRole === 'vendor') return;
 
     // Then fetch the authoritative session profile to enrich any missing details.
     try {
