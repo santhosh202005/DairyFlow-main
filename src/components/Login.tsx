@@ -161,14 +161,21 @@ export default function Login({ onLogin }: LoginProps) {
       const loginUrl = loginType === 'vendor' ? '/api/vendor/login' : '/api/login';
       const controller = new AbortController();
       const timeout = window.setTimeout(() => controller.abort(), 20_000);
-      const response = await fetch(loginUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username, password }),
-        signal: controller.signal,
-      });
-      window.clearTimeout(timeout);
-      const data = await response.json();
+      let response: Response;
+      let data: any;
+      try {
+        response = await fetch(loginUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username: username.trim(), password }),
+          signal: controller.signal,
+          cache: 'no-store',
+        });
+        console.log('[Login] Login response received:', { status: response.status, ok: response.ok });
+        data = await response.json();
+      } finally {
+        window.clearTimeout(timeout);
+      }
       console.log('[Login] API response:', {
         status: response.status,
         ok: response.ok,
