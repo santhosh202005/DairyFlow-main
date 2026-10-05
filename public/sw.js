@@ -4,7 +4,7 @@ const STATIC_ASSETS = [
   '/',
   '/index.html',
   '/manifest.json',
-  '/logo.jpg',
+  '/new%20dairy%20flow.png',
 ];
 
 // ── Install: cache static assets ──────────────────────────────────────────────

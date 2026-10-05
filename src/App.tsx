@@ -28,7 +28,6 @@ import {
   IndianRupee,
   ShieldCheck,
   ClipboardList,
-  RefreshCw
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import Dashboard from './components/Dashboard';
@@ -64,10 +63,31 @@ import WorkerAttendance from './components/WorkerAttendance';
 import WorkerSalary from './components/WorkerSalary';
 import WorkerReport from './components/WorkerReport';
 import UserManual from './components/UserManual';
+import Billing from './components/Billing';
+import LoadingScreen from './components/LoadingScreen';
+import NetworkStatusModal from './components/NetworkStatusModal';
+import UpdateAvailableModal from './components/UpdateAvailableModal';
+import { useMissingEntries, MissingEntriesModal, NotificationBell } from './components/MissingEntriesAlert';
 
+const CURRENT_APP_VERSION = import.meta.env.VITE_APP_VERSION || '1.0.10';
+const AVAILABLE_APP_VERSION = import.meta.env.VITE_LATEST_APP_VERSION || CURRENT_APP_VERSION;
+const UPDATE_DISMISSED_KEY = 'dairyflow_update_dismissed';
 
-type View = 'dashboard' | 'customers' | 'entries' | 'advances' | 'feed' | 'cattle' | 'settings' | 'vendors' | 'vendor-requests' | 'workers' | 'attendance' | 'salary' | 'my-reports' | 'manual';
+type View = 'dashboard' | 'customers' | 'entries' | 'advances' | 'feed' | 'cattle' | 'settings' | 'vendors' | 'vendor-requests' | 'workers' | 'attendance' | 'salary' | 'my-reports' | 'manual' | 'billing';
 
+function isNewerVersion(current: string, available: string) {
+  const currentParts = current.split('.').map(Number);
+  const availableParts = available.split('.').map(Number);
+  const length = Math.max(currentParts.length, availableParts.length);
+
+  for (let index = 0; index < length; index += 1) {
+    const currentPart = currentParts[index] || 0;
+    const availablePart = availableParts[index] || 0;
+    if (availablePart !== currentPart) return availablePart > currentPart;
+  }
+
+  return false;
+}
 
 
 export default function App() {
@@ -78,6 +98,11 @@ export default function App() {
   });
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [isProfileOpen, setIsProfileOpen] = useState(false);
+  const [entryPrefill, setEntryPrefill] = useState<{
+    shift?: 'AM' | 'PM';
+    customerId?: string;
+    autoOpen?: boolean;
+  }>({});
   const loginGeneration = useRef(0);
   
   const [authData, setAuthData] = useState<{
@@ -125,10 +150,63 @@ export default function App() {
   // Keep `useIsMobile` call unconditional to preserve hook order across renders
   const isMobile = useIsMobile();
 
-  const [isVerifying, setIsVerifying] = useState(() => !loadStoredAuth());
+  const [isInitialLoading, setIsInitialLoading] = useState(true);
+  const [isSplashFadingOut, setIsSplashFadingOut] = useState(false);
+  const [isSplashComplete, setIsSplashComplete] = useState(false);
+  const [isVerifying, setIsVerifying] = useState(true);
   const [serverStatus, setServerStatus] = useState<'checking' | 'starting' | 'ready'>('checking');
   const [errorMsg, setErrorMsg] = useState('');
-  const [isUpdatingApp, setIsUpdatingApp] = useState(false);
+  const [isUpdateCheckComplete, setIsUpdateCheckComplete] = useState(false);
+  const [isUpdateAvailable, setIsUpdateAvailable] = useState(false);
+
+  const { data: missingData } = useMissingEntries({
+    token: authData.token,
+    role: authData.role,
+    customerId: authData.customerId,
+    vendorId: authData.vendorId,
+  });
+
+  const handleEnterMilk = (shift?: 'AM' | 'PM', targetCustomerId?: string) => {
+    setEntryPrefill({
+      shift,
+      customerId: targetCustomerId,
+      autoOpen: true,
+    });
+    setActiveView('entries');
+  };
+
+  const handleEntryPrefillHandled = () => {
+    setEntryPrefill((current) => current.autoOpen ? { ...current, autoOpen: false } : current);
+  };
+
+  useEffect(() => {
+    const fadeTimer = setTimeout(() => {
+      setIsSplashFadingOut(true);
+    }, 2_650);
+    const completeTimer = setTimeout(() => {
+      setIsInitialLoading(false);
+      setIsSplashComplete(true);
+    }, 3_000);
+
+    return () => {
+      clearTimeout(fadeTimer);
+      clearTimeout(completeTimer);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!isSplashComplete) return;
+
+    let dismissed = false;
+    try {
+      dismissed = localStorage.getItem(UPDATE_DISMISSED_KEY) === AVAILABLE_APP_VERSION;
+    } catch {
+      dismissed = false;
+    }
+
+    setIsUpdateAvailable(!dismissed && isNewerVersion(CURRENT_APP_VERSION, AVAILABLE_APP_VERSION));
+    setIsUpdateCheckComplete(true);
+  }, [isSplashComplete]);
 
   const { t } = useTranslation();
 
@@ -140,24 +218,18 @@ export default function App() {
     setAuthData({ token: null, role: null });
   };
 
-  const handleAppUpdate = async () => {
-    if (isUpdatingApp) return;
-    setIsUpdatingApp(true);
+  const dismissUpdate = () => {
     try {
-      if ('serviceWorker' in navigator) {
-        const registrations = await navigator.serviceWorker.getRegistrations();
-        await Promise.all(registrations.map((registration) => registration.unregister()));
-      }
-      if ('caches' in window) {
-        const cacheKeys = await caches.keys();
-        await Promise.all(cacheKeys.map((cacheKey) => caches.delete(cacheKey)));
-      }
-    } finally {
-      window.location.reload();
+      localStorage.setItem(UPDATE_DISMISSED_KEY, AVAILABLE_APP_VERSION);
+    } catch {
+      // Storage can be unavailable in restricted browser contexts.
     }
+    setIsUpdateAvailable(false);
   };
 
   useEffect(() => {
+    if (!isSplashComplete) return;
+
     let didRun = false;
     const verificationGeneration = loginGeneration.current;
 
@@ -222,49 +294,63 @@ export default function App() {
     }
 
     const verifySession = async (sessionToken: string): Promise<'valid' | 'invalid' | 'unavailable'> => {
-      try {
-        const data = await apiFetch<any>(
-          '/api/auth/me',
-          {
-            headers: {
-              Authorization: `Bearer ${sessionToken}`,
+      let lastError: unknown;
+
+      // A sleeping backend can briefly answer 401 while its database connection
+      // is recovering. Confirm the response before clearing a persisted session.
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        try {
+          const data = await apiFetch<any>(
+            '/api/auth/me',
+            {
+              headers: {
+                Authorization: `Bearer ${sessionToken}`,
+              },
             },
-          },
-          // Keep apiFetch retries, but hard-timeout the whole flow below.
-          { retries: 6, delayMs: 1000 }
-        );
+            // Keep apiFetch retries, but hard-timeout the whole flow below.
+            { retries: 6, delayMs: 1000 }
+          );
 
-        if (data?.success) {
-          if (loginGeneration.current !== verificationGeneration) return 'unavailable';
-          console.log('[Auth] Token valid.');
-          setAuthData({
-            token: sessionToken,
-            role: data.role,
-            customerId: data.customerId?.toString(),
-            customerName: data.customerName,
-            customerCode: data.customerCode,
-            defaultRate: data.defaultRate,
-            customerPhone: data.customerPhone,
-            customerAddress: data.customerAddress,
-            customerGender: data.customerGender,
-            vendorId: data.vendorId?.toString(),
-            vendorName: data.vendorName,
-            vendorPhone: data.vendorPhone,
-            vendorAddress: data.vendorAddress,
-            profilePicture: data.profilePicture,
-            workerId: data.workerId?.toString(),
-            workerName: data.workerName,
-            workerPhone: data.workerPhone,
-          });
-          return 'valid';
+          if (data?.success) {
+            if (loginGeneration.current !== verificationGeneration) return 'unavailable';
+            console.log('[Auth] Token valid.');
+            setAuthData({
+              token: sessionToken,
+              role: data.role,
+              customerId: data.customerId?.toString(),
+              customerName: data.customerName,
+              customerCode: data.customerCode,
+              defaultRate: data.defaultRate,
+              customerPhone: data.customerPhone,
+              customerAddress: data.customerAddress,
+              customerGender: data.customerGender,
+              vendorId: data.vendorId?.toString(),
+              vendorName: data.vendorName,
+              vendorPhone: data.vendorPhone,
+              vendorAddress: data.vendorAddress,
+              profilePicture: data.profilePicture,
+              workerId: data.workerId?.toString(),
+              workerName: data.workerName,
+              workerPhone: data.workerPhone,
+            });
+            return 'valid';
+          }
+
+          console.warn('[Auth] /api/auth/me responded but not success:', data);
+          return 'invalid';
+        } catch (e) {
+          lastError = e;
+          const message = String((e as any)?.message || e);
+          if (!message.includes('HTTP 401') || attempt === 1) {
+            console.error('[Auth] Token verification error:', e);
+            return message.includes('HTTP 401') ? 'invalid' : 'unavailable';
+          }
+          await new Promise((resolve) => setTimeout(resolve, 750));
         }
-
-        console.warn('[Auth] /api/auth/me responded but not success:', data);
-        return 'invalid';
-      } catch (e) {
-        console.error('[Auth] Token verification error:', e);
-        return String((e as any)?.message || e).includes('HTTP 401') ? 'invalid' : 'unavailable';
       }
+
+      console.error('[Auth] Token verification error:', lastError);
+      return 'unavailable';
     };
 
     const checkServerAndSession = async () => {
@@ -284,6 +370,8 @@ export default function App() {
               redirectToLogin('session verification failed');
             } else if (sessionStatus === 'unavailable') {
               keepStoredSession('session verification unavailable');
+            } else {
+              setServerStatus('ready');
             }
           })(),
           10_000
@@ -311,7 +399,7 @@ export default function App() {
 
     checkServerAndSession();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [isSplashComplete]);
 
   const handleLogin = async (
     token: string,
@@ -436,36 +524,32 @@ export default function App() {
   };
 
 
-  if (isVerifying) {
+  if (isInitialLoading || isVerifying || !isUpdateCheckComplete) {
     return (
-      <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
-        <div className="w-full max-w-md bg-white rounded-3xl shadow-xl border border-slate-100 p-8 text-center space-y-6">
-          <div className="w-20 h-20 bg-emerald-50 text-emerald-600 rounded-2xl flex items-center justify-center mx-auto shadow-inner relative">
-            <div className="absolute inset-0 rounded-2xl border-4 border-emerald-500/20 border-t-emerald-600 animate-spin" />
-            <img src="/logo.jpg" alt="DairyFlow Logo" className="w-14 h-14 object-cover rounded-xl" />
-          </div>
-          <div className="space-y-2">
-            <h3 className="text-xl font-display font-bold text-slate-900">
-              {serverStatus === 'starting' ? 'Connecting to Server' : 'Verifying Session'}
-            </h3>
-            <p className="text-sm text-slate-400 font-medium leading-relaxed">
-              {serverStatus === 'starting' 
-                ? 'Server is starting, please wait a few seconds...' 
-                : 'Restoring your session details, please wait...'}
-            </p>
-          </div>
-          {errorMsg && (
-            <div className="p-3 bg-rose-50 text-rose-600 text-xs font-bold rounded-xl border border-rose-100">
-              {errorMsg}
-            </div>
-          )}
-        </div>
-      </div>
+      <>
+        <LoadingScreen 
+          message={serverStatus === 'starting' ? t('connectingToServer') : t('loadingDairyFlow')} 
+          isFadingOut={isSplashFadingOut}
+        />
+        <NetworkStatusModal />
+      </>
     );
   }
 
   if (!authData.token) {
-    return <Login onLogin={handleLogin} />;
+    return (
+      <>
+        <Login onLogin={handleLogin} />
+        {isUpdateAvailable && (
+          <UpdateAvailableModal
+            currentVersion={CURRENT_APP_VERSION}
+            newVersion={AVAILABLE_APP_VERSION}
+            onCancel={dismissUpdate}
+          />
+        )}
+        <NetworkStatusModal />
+      </>
+    );
   }
 
   const navLabel = (key: string, fallback: string) => t(key) || fallback;
@@ -485,6 +569,7 @@ export default function App() {
       { id: 'salary', label: navLabel('salary', 'Salary'), icon: IndianRupee },
       { id: 'customers', label: navLabel('farmers', 'Farmers'), icon: Users },
       { id: 'entries', label: navLabel('logistics', 'Logistics'), icon: Milk },
+      { id: 'billing', label: navLabel('billing', 'Reports & Bills'), icon: FileText },
       { id: 'advances', label: navLabel('ledger', 'Ledger'), icon: Wallet },
       { id: 'feed', label: navLabel('resources', 'Resources'), icon: Package },
       { id: 'cattle', label: navLabel('cattleRecords', 'Cattle & Vaccines'), icon: ShieldCheck },
@@ -493,6 +578,7 @@ export default function App() {
       { id: 'my-reports', label: navLabel('myReports', 'My Salary & Reports'), icon: FileText },
     ] : authData.role === 'customer' ? [
       { id: 'entries', label: navLabel('mySupply', 'My Supply'), icon: Milk },
+      { id: 'billing', label: navLabel('myReports', 'My Reports & Bills'), icon: FileText },
       { id: 'cattle', label: navLabel('cattleRecords', 'Cattle & Vaccines'), icon: ShieldCheck },
       { id: 'advances', label: navLabel('myLedger', 'My Ledger'), icon: Wallet },
       { id: 'feed', label: navLabel('myStocks', 'My Stocks'), icon: Package },
@@ -510,8 +596,8 @@ export default function App() {
         }`}
       >
         <div className="p-8 flex items-center gap-4 border-b border-slate-50">
-          <div className="w-12 h-12 rounded-[1.2rem] flex items-center justify-center shrink-0 overflow-hidden bg-white shadow-sm border border-slate-100">
-            <img src="/logo.jpg" alt="DairyFlow Logo" className="w-full h-full object-cover" />
+          <div className="w-12 h-12 rounded-[1.2rem] flex items-center justify-center shrink-0 overflow-hidden bg-transparent">
+            <img src="/new%20dairy%20flow.png" alt="DairyFlow Logo" className="w-full h-full object-contain drop-shadow-[0_4px_10px_rgba(16,185,129,0.18)]" />
           </div>
           <AnimatePresence>
             {isSidebarOpen && (
@@ -571,10 +657,14 @@ export default function App() {
       <main className="flex-1 overflow-auto relative glass-card flex flex-col">
         <header className="bg-white/90 backdrop-blur-xl border-b border-slate-100 px-3 py-3 md:px-10 md:py-5 sticky top-0 z-30 flex justify-between items-center shadow-soft">
           <div className="flex items-center gap-3 min-w-0">
+            <div className="w-9 h-9 rounded-xl bg-transparent overflow-hidden shrink-0 md:hidden">
+              <img src="/new%20dairy%20flow.png" alt="DairyFlow Logo" className="w-full h-full object-contain drop-shadow-[0_3px_8px_rgba(16,185,129,0.18)]" />
+            </div>
             <h1 className="text-[17px] md:text-3xl font-display font-bold text-slate-900 tracking-tight capitalize truncate max-w-[35vw] md:max-w-none">
               {activeView === 'dashboard' ? t('dashboard') 
                 : activeView === 'customers' ? t('farmers')
                 : activeView === 'entries' ? t('milkSupply')
+                : activeView === 'billing' ? (authData.role === 'customer' ? t('myReports') : t('reportsBilling'))
                 : activeView === 'advances' ? t('advances')
                 : activeView === 'feed' ? t('cattleFeed')
                 : activeView === 'cattle' ? (t('cattleManagement') || 'Farm & Cattle')
@@ -582,16 +672,7 @@ export default function App() {
                 : activeView === 'settings' ? t('settings')
                 : (activeView as string).replace('-', ' ')}
             </h1>
-            <button
-              type="button"
-              onClick={handleAppUpdate}
-              disabled={isUpdatingApp}
-              className="hidden shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-[10px] font-black uppercase tracking-wide text-amber-700 transition-colors hover:bg-amber-100 disabled:cursor-wait disabled:opacity-70 md:inline-flex md:px-3"
-              title="Update the app"
-            >
-              <RefreshCw size={13} className={isUpdatingApp ? 'animate-spin' : ''} />
-              <span>{isUpdatingApp ? 'Updating...' : 'Update app'}</span>
-            </button>
+
           </div>
           
           <div className="flex shrink-0 items-center gap-2 md:gap-6 relative">
@@ -603,6 +684,14 @@ export default function App() {
                 {authData.role === 'admin' ? 'Owner' : authData.role === 'vendor' ? 'Vendor' : authData.role === 'worker' ? 'Worker' : 'Farmer'}
               </span>
             </div>
+
+            {/* Notification Bell for Customer & Vendor */}
+            <NotificationBell
+              data={missingData}
+              role={authData.role}
+              onEnterMilk={handleEnterMilk}
+            />
+
             <div 
               onClick={() => setIsProfileOpen(!isProfileOpen)}
               className="w-10 h-10 md:w-12 md:h-12 rounded-xl md:rounded-2xl bg-white border-2 border-slate-100 shadow-soft overflow-hidden p-0.5 md:p-1 transition-transform hover:scale-105 cursor-pointer relative z-50 touch-btn flex items-center justify-center"
@@ -698,18 +787,6 @@ export default function App() {
           </div>
         </header>
 
-        <div className="px-3 pt-3 md:hidden">
-          <button
-            type="button"
-            onClick={handleAppUpdate}
-            disabled={isUpdatingApp}
-            className="flex w-full items-center justify-center gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-3 text-xs font-black uppercase tracking-wide text-amber-700 transition-colors hover:bg-amber-100 disabled:cursor-wait disabled:opacity-70"
-          >
-            <RefreshCw size={15} className={isUpdatingApp ? 'animate-spin' : ''} />
-            <span>{isUpdatingApp ? 'Updating app...' : 'Update app to get the latest version'}</span>
-          </button>
-        </div>
-
         <div className="p-3 md:p-10 max-w-7xl mx-auto flex-1 mobile-bottom-padding">
           <AnimatePresence mode="wait">
             <motion.div
@@ -723,7 +800,7 @@ export default function App() {
                 damping: 20 
               }}
             >
-              {activeView === 'dashboard' && <Dashboard customerId={authData.customerId} vendorId={authData.vendorId} workerId={authData.workerId} onNavigate={setActiveView} />}
+              {activeView === 'dashboard' && <Dashboard customerId={authData.customerId} vendorId={authData.vendorId} workerId={authData.workerId} onNavigate={setActiveView} missingData={missingData} onEnterMilk={handleEnterMilk} />}
               {activeView === 'manual' && <UserManual userRole={authData.role ?? undefined} />}
               {activeView === 'vendors' && authData.role === 'admin' && (
                 <VendorManagement onNavigateToRequests={() => setActiveView('vendor-requests')} />
@@ -734,7 +811,15 @@ export default function App() {
               {activeView === 'salary' && authData.role === 'vendor' && <WorkerSalary vendorId={authData.vendorId} />}
               {activeView === 'my-reports' && authData.role === 'worker' && <WorkerReport workerId={authData.workerId} vendorId={authData.vendorId} workerName={authData.workerName} />}
               {activeView === 'customers' && (authData.role === 'admin' || authData.role === 'vendor') && <Customers vendorId={authData.vendorId} isVendor={authData.role === 'vendor'} readOnly={authData.role === 'admin'} />}
-              {activeView === 'entries' && authData.role !== 'admin' && <MilkEntries customerId={authData.customerId} vendorId={authData.vendorId} workerId={authData.workerId} workerName={authData.workerName} isAdmin={false} isVendor={authData.role === 'vendor' || authData.role === 'worker'} isWorker={authData.role === 'worker'} defaultRate={authData.defaultRate} />}
+              {activeView === 'entries' && authData.role !== 'admin' && <MilkEntries customerId={authData.customerId} vendorId={authData.vendorId} workerId={authData.workerId} workerName={authData.workerName} isAdmin={false} isVendor={authData.role === 'vendor' || authData.role === 'worker'} isWorker={authData.role === 'worker'} defaultRate={authData.defaultRate} initialShift={entryPrefill.shift} initialCustomerId={entryPrefill.customerId} autoOpenModal={entryPrefill.autoOpen} onAutoOpenHandled={handleEntryPrefillHandled} />}
+              {activeView === 'billing' && (
+                <Billing 
+                  customerId={authData.customerId} 
+                  isWorker={authData.role === 'worker'}
+                  workerId={authData.workerId}
+                  isCustomer={authData.role === 'customer'}
+                />
+              )}
               {activeView === 'advances' && authData.role !== 'admin' && authData.role !== 'worker' && <Advances customerId={authData.customerId} vendorId={authData.vendorId} isAdmin={false} isVendor={authData.role === 'vendor'} />}
               {activeView === 'feed' && authData.role !== 'admin' && authData.role !== 'worker' && <CattleFeed customerId={authData.customerId} vendorId={authData.vendorId} isAdmin={false} isVendor={authData.role === 'vendor'} />}
               {activeView === 'cattle' && (authData.role === 'customer' || authData.role === 'vendor' || authData.role === 'admin') && (
@@ -763,6 +848,20 @@ export default function App() {
           </AnimatePresence>
         </div>
       </main>
+
+      {isUpdateAvailable && (
+        <UpdateAvailableModal
+          currentVersion={CURRENT_APP_VERSION}
+          newVersion={AVAILABLE_APP_VERSION}
+          onCancel={dismissUpdate}
+        />
+      )}
+
+      <MissingEntriesModal
+        data={missingData}
+        role={authData.role}
+        onEnterMilk={handleEnterMilk}
+      />
 
       {/* Mobile Bottom Navigation */}
       {isMobile && (
@@ -801,6 +900,8 @@ export default function App() {
         </nav>
       )}
 
+      {/* Global Network Connectivity Detector Modal */}
+      <NetworkStatusModal />
     </div>
   );
 }

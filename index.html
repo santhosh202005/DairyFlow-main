@@ -35,15 +35,69 @@
     <meta property="og:title" content="DairyFlow" />
     <meta property="og:description" content="Dairy farm management made simple." />
     <meta property="og:type" content="website" />
-    <meta property="og:image" content="/logo.jpg" />
+    <meta property="og:image" content="/new%20dairy%20flow.png" />
 
     <!-- Splash screen background while loading -->
     <style>
-      body { margin: 0; background: #0f172a; }
+      body { margin: 0; background: #0f172a; font-family: system-ui, -apple-system, sans-serif; }
+      #df-splash {
+        position: fixed; inset: 0; z-index: 99999;
+        display: flex; flex-direction: column; align-items: center; justify-content: center;
+        background: #0f172a; color: #fff; text-align: center; padding: 24px;
+      }
+      .df-logo-box {
+        width: 96px; height: 96px; border-radius: 24px; overflow: hidden;
+        background: linear-gradient(to bottom, #34d399, #047857);
+        box-shadow: 0 20px 25px -5px rgba(6, 78, 59, 0.5);
+        box-sizing: border-box; margin-bottom: 24px;
+      }
+      .df-logo-box img { width: 100%; height: 100%; object-fit: cover; display: block; }
+      .df-title { font-size: 26px; font-weight: 800; margin: 0 0 4px 0; color: #fff; letter-spacing: -0.5px; }
+      .df-title span { color: #34d399; }
+      .df-sub { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.25em; color: #94a3b8; margin: 0 0 24px 0; }
+      .df-spinner {
+        position: relative; width: 44px; height: 44px; margin-bottom: 16px;
+      }
+      .df-spinner-ring {
+        position: absolute; inset: 0; border-radius: 50%;
+        border: 3px solid rgba(52, 211, 153, 0.2);
+      }
+      .df-spinner-arc {
+        position: absolute; inset: 0; border-radius: 50%;
+        border: 3px solid transparent; border-top-color: #34d399; border-right-color: #10b981;
+        animation: df-spin 0.9s linear infinite;
+      }
+      .df-text {
+        font-size: 13px; font-weight: 600; color: #cbd5e1; letter-spacing: 0.025em;
+        animation: df-pulse 1.8s ease-in-out infinite; margin: 0;
+      }
+      @keyframes df-spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+      @keyframes df-pulse { 0%, 100% { opacity: 0.6; } 50% { opacity: 1; } }
     </style>
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root">
+      <div id="df-splash">
+        <div class="df-logo-box">
+          <img src="/new%20dairy%20flow.png" alt="Dairy Flow" />
+        </div>
+        <h1 id="df-title" class="df-title">Dairy<span>Flow</span></h1>
+        <p id="df-sub" class="df-sub">Dairy Management</p>
+        <div class="df-spinner">
+          <div class="df-spinner-ring"></div>
+          <div class="df-spinner-arc"></div>
+        </div>
+        <p id="df-text" class="df-text">Loading Dairy Flow...</p>
+      </div>
+    </div>
+    <script>
+      try {
+        if (localStorage.getItem('dairy_app_language') === 'ta') {
+          document.getElementById('df-sub').textContent = 'பால் பண்ணை மேலாண்மை';
+          document.getElementById('df-text').textContent = 'Dairy Flow ஏற்றப்படுகிறது...';
+        }
+      } catch (_) {}
+    </script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

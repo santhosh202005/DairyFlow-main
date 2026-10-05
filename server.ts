@@ -10,6 +10,7 @@ import nodemailer from "nodemailer";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+const roundCurrency = (amount: number) => Math.round((amount + Number.EPSILON) * 100) / 100;
 
 // ─── Turso / libSQL Client ───────────────────────────────────────────────────
 // For local dev: set TURSO_DB_URL=file:dairy.db  (no token needed)
@@ -74,6 +75,10 @@ async function initDB() {
   try { await db.execute("ALTER TABLE workers ADD COLUMN salary_amount REAL DEFAULT 0"); } catch (_) {}
   try { await db.execute("ALTER TABLE workers ADD COLUMN daily_wage REAL DEFAULT 0"); } catch (_) {}
   try { await db.execute("ALTER TABLE workers ADD COLUMN profile_picture TEXT"); } catch (_) {}
+  try { await db.execute("ALTER TABLE customers ADD COLUMN status TEXT DEFAULT 'active'"); } catch (_) {}
+  try { await db.execute("ALTER TABLE customers ADD COLUMN schedule TEXT DEFAULT 'both'"); } catch (_) {}
+  try { await db.execute("ALTER TABLE vendors ADD COLUMN status TEXT DEFAULT 'active'"); } catch (_) {}
+  try { await db.execute("ALTER TABLE vendors ADD COLUMN schedule TEXT DEFAULT 'both'"); } catch (_) {}
 
   await db.executeMultiple(`
     CREATE TABLE IF NOT EXISTS vendors (
@@ -84,6 +89,8 @@ async function initDB() {
       phone TEXT,
       address TEXT,
       profile_picture TEXT,
+      status TEXT DEFAULT 'active',
+      schedule TEXT DEFAULT 'both',
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
 
@@ -102,6 +109,8 @@ async function initDB() {
       otp TEXT,
       otp_expires_at INTEGER,
       profile_picture TEXT,
+      status TEXT DEFAULT 'active',
+      schedule TEXT DEFAULT 'both',
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
 
@@ -169,10 +178,29 @@ async function initDB() {
       date DATE NOT NULL,
       quantity REAL NOT NULL,
       amount REAL NOT NULL,
+      unit_price REAL,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE CASCADE,
       FOREIGN KEY (feed_type_id) REFERENCES feed_types(id)
     );
+
+    CREATE TABLE IF NOT EXISTS feed_reductions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      customer_id INTEGER NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
+      feed_type_id INTEGER REFERENCES feed_types(id),
+      month TEXT NOT NULL,
+      quantity REAL NOT NULL,
+      unit_price REAL NOT NULL,
+      amount REAL NOT NULL,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(customer_id, month, feed_type_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS feed_settings (
+      id INTEGER PRIMARY KEY CHECK (id = 1),
+      sack_price REAL NOT NULL DEFAULT 1400
+    );
+    INSERT OR IGNORE INTO feed_settings (id, sack_price) VALUES (1, 1400);
 
     CREATE TABLE IF NOT EXISTS payments (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -235,6 +263,26 @@ async function initDB() {
   await tryAddCol('customers', 'bank_name', 'TEXT');
   await tryAddCol('customers', 'account_number', 'TEXT');
   await tryAddCol('customers', 'ifsc_code', 'TEXT');
+  await tryAddCol('feed_purchases', 'unit_price', 'REAL');
+  await db.execute("UPDATE feed_purchases SET unit_price = CASE WHEN quantity > 0 THEN amount / quantity ELSE 0 END WHERE unit_price IS NULL");
+  const feedReductionSchema = await db.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='feed_reductions'");
+  if (!String(feedReductionSchema.rows[0]?.sql || '').includes('feed_type_id')) {
+    await db.execute('ALTER TABLE feed_reductions RENAME TO feed_reductions_legacy');
+    await db.execute(`CREATE TABLE feed_reductions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      customer_id INTEGER NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
+      feed_type_id INTEGER REFERENCES feed_types(id),
+      month TEXT NOT NULL,
+      quantity REAL NOT NULL,
+      unit_price REAL NOT NULL,
+      amount REAL NOT NULL,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(customer_id, month, feed_type_id)
+    )`);
+    await db.execute(`INSERT INTO feed_reductions (id, customer_id, month, quantity, unit_price, amount, created_at)
+      SELECT id, customer_id, month, quantity, unit_price, amount, created_at FROM feed_reductions_legacy`);
+    await db.execute('DROP TABLE feed_reductions_legacy');
+  }
   await tryAddCol('customers', 'upi_id', 'TEXT');
 
   await tryAddCol('workers', 'bank_name', 'TEXT');
@@ -902,6 +950,7 @@ async function startServer() {
         }
       } catch (err) {
         console.error("[AuthMe] Vendor DB error:", err);
+        return res.status(503).json({ success: false, message: "Authentication service temporarily unavailable" });
       }
     }
     if (token.startsWith("worker-token-")) {
@@ -931,6 +980,7 @@ async function startServer() {
         }
       } catch (err) {
         console.error("[AuthMe] Worker DB error:", err);
+        return res.status(503).json({ success: false, message: "Authentication service temporarily unavailable" });
       }
     }
     if (token.startsWith("customer-token-")) {
@@ -964,6 +1014,7 @@ async function startServer() {
         }
       } catch (err) {
         console.error("[AuthMe] DB error:", err);
+        return res.status(503).json({ success: false, message: "Authentication service temporarily unavailable" });
       }
     }
     res.status(401).json({ success: false, message: "Invalid token" });
@@ -1622,7 +1673,7 @@ async function startServer() {
       const r = await db.execute({ sql: "SELECT default_rate FROM customers WHERE id = ?", args: [customer_id] });
       rate = (r.rows[0]?.default_rate as number) || 30;
     }
-    const amount = liters * rate;
+    const amount = roundCurrency(liters * rate);
 
     // Track which worker is recording the entry
     const authHeader = req.headers.authorization;
@@ -1646,12 +1697,413 @@ async function startServer() {
     }
   });
 
+  // ─── GET /api/missing-entries ───────────────────────────────────────────────
+  // Checks missing AM / PM milk entries for Customers and Vendors
+  app.get("/api/missing-entries", async (req, res) => {
+    try {
+      const authHeader = req.headers.authorization;
+      let token = "";
+      if (authHeader) {
+        token = authHeader.replace("Bearer ", "").trim();
+      }
+
+      let role: string | undefined = undefined;
+      let customerId: string | undefined = typeof req.query.customerId === "string" ? req.query.customerId : undefined;
+      let vendorId: string | undefined = typeof req.query.vendorId === "string" ? req.query.vendorId : undefined;
+
+      if (token.startsWith("customer-token-")) {
+        role = "customer";
+        if (!customerId) customerId = token.replace("customer-token-", "");
+      } else if (token.startsWith("vendor-token-")) {
+        role = "vendor";
+        if (!vendorId) vendorId = token.replace("vendor-token-", "");
+      } else if (token.startsWith("worker-token-")) {
+        role = "worker";
+      } else if (token === "admin-token") {
+        role = "admin";
+      }
+
+      // If role not yet deduced from token, infer from query params
+      if (!role) {
+        if (customerId) role = "customer";
+        else if (vendorId) role = "vendor";
+      }
+
+      // Neither customer nor vendor
+      if (role !== "customer" && role !== "vendor") {
+        return res.json({
+          role: role || "unknown",
+          count: 0,
+          isApplicable: false,
+          amMissing: false,
+          pmMissing: false,
+          entries: [],
+          message: "",
+        });
+      }
+
+      // Local date YYYY-MM-DD
+      const now = new Date();
+      const localToday = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+      const date = typeof req.query.date === "string" && req.query.date.match(/^\d{4}-\d{2}-\d{2}$/)
+        ? req.query.date
+        : localToday;
+
+      // ── CUSTOMER FLOW ──
+      if (role === "customer") {
+        if (!customerId) {
+          return res.json({ role: "customer", count: 0, isApplicable: false, entries: [] });
+        }
+
+        const cRes = await db.execute({
+          sql: "SELECT id, name, status, schedule FROM customers WHERE id = ?",
+          args: [customerId],
+        });
+        const customer = cRes.rows[0];
+        if (!customer) {
+          return res.status(404).json({ success: false, message: "Customer not found" });
+        }
+
+        const status = (customer.status as string) || "active";
+        // Avoid false alerts if inactive or suspended
+        if (status === "inactive" || status === "suspended") {
+          return res.json({
+            role: "customer",
+            date,
+            customerId: customer.id,
+            customerName: customer.name,
+            isApplicable: false,
+            count: 0,
+            amMissing: false,
+            pmMissing: false,
+            entries: [],
+            reason: `Account is ${status}`,
+          });
+        }
+
+        const schedule = ((customer.schedule as string) || "both").toUpperCase();
+        if (schedule === "NONE") {
+          return res.json({
+            role: "customer",
+            date,
+            customerId: customer.id,
+            customerName: customer.name,
+            isApplicable: false,
+            count: 0,
+            amMissing: false,
+            pmMissing: false,
+            entries: [],
+            reason: "Milk collection not scheduled for today",
+          });
+        }
+
+        const requiresAM = schedule === "BOTH" || schedule === "AM";
+        const requiresPM = schedule === "BOTH" || schedule === "PM";
+
+        let amMissing = false;
+        let pmMissing = false;
+
+        if (requiresAM) {
+          const amRes = await db.execute({
+            sql: "SELECT id, liters FROM milk_entries WHERE customer_id = ? AND date = ? AND shift = 'AM' AND liters > 0",
+            args: [customerId, date],
+          });
+          if (!amRes.rows || amRes.rows.length === 0) {
+            amMissing = true;
+          }
+        }
+
+        if (requiresPM) {
+          const pmRes = await db.execute({
+            sql: "SELECT id, liters FROM milk_entries WHERE customer_id = ? AND date = ? AND shift = 'PM' AND liters > 0",
+            args: [customerId, date],
+          });
+          if (!pmRes.rows || pmRes.rows.length === 0) {
+            pmMissing = true;
+          }
+        }
+
+        const entries: Array<{ shift: "AM" | "PM"; label: string; detail: string; status: "pending" }> = [];
+        if (amMissing) {
+          entries.push({
+            shift: "AM",
+            label: "AM milk entry is pending.",
+            detail: "Your AM milk entry for today has not been entered.",
+            status: "pending",
+          });
+        }
+        if (pmMissing) {
+          entries.push({
+            shift: "PM",
+            label: "PM milk entry is pending.",
+            detail: "Your PM milk entry for today has not been entered.",
+            status: "pending",
+          });
+        }
+
+        let message = "";
+        let title = "";
+        if (amMissing && pmMissing) {
+          title = "Today's AM and PM milk entries are pending.";
+          message = "Today's AM and PM milk entries are pending.";
+        } else if (amMissing) {
+          title = "AM Milk Entry Pending";
+          message = "AM milk entry is pending.";
+        } else if (pmMissing) {
+          title = "PM Milk Entry Pending";
+          message = "PM milk entry is pending.";
+        }
+
+        return res.json({
+          role: "customer",
+          date,
+          customerId: customer.id,
+          customerName: customer.name,
+          isApplicable: true,
+          count: entries.length,
+          amMissing,
+          pmMissing,
+          title,
+          message,
+          entries,
+        });
+      }
+
+      // ── VENDOR FLOW ──
+      if (role === "vendor") {
+        if (!vendorId) {
+          return res.json({ role: "vendor", count: 0, isApplicable: false, entries: [] });
+        }
+
+        const vRes = await db.execute({
+          sql: "SELECT id, name, status, schedule FROM vendors WHERE id = ?",
+          args: [vendorId],
+        });
+        const vendor = vRes.rows[0];
+        if (!vendor) {
+          return res.status(404).json({ success: false, message: "Vendor not found" });
+        }
+
+        const vStatus = (vendor.status as string) || "active";
+        if (vStatus === "inactive" || vStatus === "suspended") {
+          return res.json({
+            role: "vendor",
+            date,
+            vendorId: vendor.id,
+            vendorName: vendor.name,
+            isApplicable: false,
+            count: 0,
+            entries: [],
+            reason: `Vendor account is ${vStatus}`,
+          });
+        }
+
+        // Get all active customers linked to this vendor
+        const custRes = await db.execute({
+          sql: `SELECT id, name, customer_code, status, schedule 
+                FROM customers 
+                WHERE vendor_id = ? AND (status IS NULL OR status = 'active')`,
+          args: [vendorId],
+        });
+
+        const activeCustomers = custRes.rows;
+        if (!activeCustomers || activeCustomers.length === 0) {
+          return res.json({
+            role: "vendor",
+            date,
+            vendorId: vendor.id,
+            vendorName: vendor.name,
+            isApplicable: true,
+            count: 0,
+            amMissing: false,
+            pmMissing: false,
+            entries: [],
+          });
+        }
+
+        // Fetch all milk entries for today for this vendor's customers
+        const entriesRes = await db.execute({
+          sql: `SELECT e.customer_id, e.shift, e.liters 
+                FROM milk_entries e
+                JOIN customers c ON e.customer_id = c.id
+                WHERE c.vendor_id = ? AND e.date = ? AND e.liters > 0`,
+          args: [vendorId, date],
+        });
+
+        const recordedSet = new Set<string>();
+        for (const row of entriesRes.rows) {
+          recordedSet.add(`${row.customer_id}_${row.shift}`);
+        }
+
+        const missingEntries: Array<{
+          customerId: number;
+          customerName: string;
+          customerCode?: string;
+          shift: "AM" | "PM";
+          label: string;
+          detail: string;
+          status: "pending";
+        }> = [];
+
+        let amMissingCount = 0;
+        let pmMissingCount = 0;
+
+        for (const c of activeCustomers) {
+          const cSched = ((c.schedule as string) || "both").toUpperCase();
+          if (cSched === "NONE") continue;
+
+          const reqAM = cSched === "BOTH" || cSched === "AM";
+          const reqPM = cSched === "BOTH" || cSched === "PM";
+
+          if (reqAM && !recordedSet.has(`${c.id}_AM`)) {
+            amMissingCount++;
+            missingEntries.push({
+              customerId: Number(c.id),
+              customerName: String(c.name),
+              customerCode: c.customer_code ? String(c.customer_code) : undefined,
+              shift: "AM",
+              label: `AM milk entry pending: ${c.name}`,
+              detail: `AM milk entry for ${c.name} has not been entered.`,
+              status: "pending",
+            });
+          }
+
+          if (reqPM && !recordedSet.has(`${c.id}_PM`)) {
+            pmMissingCount++;
+            missingEntries.push({
+              customerId: Number(c.id),
+              customerName: String(c.name),
+              customerCode: c.customer_code ? String(c.customer_code) : undefined,
+              shift: "PM",
+              label: `PM milk entry pending: ${c.name}`,
+              detail: `PM milk entry for ${c.name} has not been entered.`,
+              status: "pending",
+            });
+          }
+        }
+
+        let message = "";
+        let title = "";
+        if (amMissingCount > 0 && pmMissingCount > 0) {
+          title = "Today's AM and PM milk entries are pending.";
+          message = "Today's AM and PM milk entries are pending.";
+        } else if (amMissingCount > 0) {
+          title = "AM Milk Entry Pending";
+          message = "AM milk entry is pending.";
+        } else if (pmMissingCount > 0) {
+          title = "PM Milk Entry Pending";
+          message = "PM milk entry is pending.";
+        }
+
+        return res.json({
+          role: "vendor",
+          date,
+          vendorId: vendor.id,
+          vendorName: vendor.name,
+          isApplicable: true,
+          count: missingEntries.length,
+          amMissing: amMissingCount > 0,
+          pmMissing: pmMissingCount > 0,
+          amMissingCount,
+          pmMissingCount,
+          title,
+          message,
+          entries: missingEntries,
+        });
+      }
+    } catch (err: any) {
+      console.error("[GET /api/missing-entries] Error:", err);
+      res.status(500).json({ success: false, message: "Internal server error" });
+    }
+  });
+
   app.delete("/api/entries/:id", async (req, res) => {
     const id = parseInt(req.params.id);
     if (isNaN(id)) return res.status(400).json({ success: false, message: "Invalid ID" });
     const result = await db.execute({ sql: "DELETE FROM milk_entries WHERE id = ?", args: [id] });
     if (result.rowsAffected === 0) return res.status(404).json({ success: false, message: "Entry not found" });
     res.json({ success: true });
+  });
+
+  // PUT /api/entries/bulk-update-rate — vendor-only bulk milk rate update
+  // Recalculates amount = liters * new_rate for all matched entries.
+  // Also updates customers.default_rate for the customer.
+  app.put("/api/entries/bulk-update-rate", async (req, res) => {
+    const authHeader = req.headers.authorization;
+    if (!authHeader) {
+      return res.status(401).json({ success: false, message: "Unauthorized" });
+    }
+    const token = authHeader.replace("Bearer ", "").trim();
+    const isAdmin = token === "admin-token";
+    const isVendor = token.startsWith("vendor-token-");
+
+    if (!isAdmin && !isVendor) {
+      return res.status(403).json({ success: false, message: "Only vendors and admin can update milk rates" });
+    }
+
+    const vendorId = isVendor ? token.replace("vendor-token-", "") : null;
+    const { customer_id, new_rate, apply_mode, from_date } = req.body;
+
+    if (!customer_id || new_rate === undefined || new_rate === null) {
+      return res.status(400).json({ success: false, message: "customer_id and new_rate are required" });
+    }
+    if (!apply_mode || !["all", "from_date"].includes(apply_mode)) {
+      return res.status(400).json({ success: false, message: "apply_mode must be 'all' or 'from_date'" });
+    }
+    if (apply_mode === "from_date" && !from_date) {
+      return res.status(400).json({ success: false, message: "from_date is required when apply_mode is 'from_date'" });
+    }
+    const rateNum = parseFloat(new_rate);
+    if (isNaN(rateNum) || rateNum <= 0) {
+      return res.status(400).json({ success: false, message: "new_rate must be a positive number" });
+    }
+
+    try {
+      // If vendor, verify the customer belongs to this vendor
+      if (vendorId) {
+        const custCheck = await db.execute({
+          sql: "SELECT id FROM customers WHERE id = ? AND vendor_id = ?",
+          args: [customer_id, vendorId],
+        });
+        if (custCheck.rows.length === 0) {
+          return res.status(403).json({ success: false, message: "Customer not found or does not belong to this vendor" });
+        }
+      }
+
+      // Fetch entries to update
+      let fetchSql = "SELECT id, liters FROM milk_entries WHERE customer_id = ?";
+      const fetchArgs: any[] = [customer_id];
+      if (apply_mode === "from_date" && from_date) {
+        fetchSql += " AND date >= ?";
+        fetchArgs.push(from_date);
+      }
+      const entryRows = await db.execute({ sql: fetchSql, args: fetchArgs });
+
+      // Bulk update each entry with new rate and recalculated amount
+      let updatedCount = 0;
+      for (const row of entryRows.rows as any[]) {
+        const liters = Number(row.liters) || 0;
+        const newAmount = roundCurrency(liters * rateNum);
+        await db.execute({
+          sql: "UPDATE milk_entries SET rate = ?, amount = ? WHERE id = ?",
+          args: [rateNum, newAmount, row.id],
+        });
+        updatedCount++;
+      }
+
+      // Update the customer's default rate for future entries
+      await db.execute({
+        sql: "UPDATE customers SET default_rate = ? WHERE id = ?",
+        args: [rateNum, customer_id],
+      });
+
+      console.log(`[BulkRateUpdate] Vendor ${vendorId} updated rate to ₹${rateNum}/L for customer ${customer_id}. Mode: ${apply_mode}${from_date ? ` from ${from_date}` : ""}. Updated ${updatedCount} entries.`);
+
+      return res.json({ success: true, updatedCount });
+    } catch (err: any) {
+      console.error("[BulkRateUpdate] Error:", err);
+      return res.status(500).json({ success: false, message: "Server error updating rates" });
+    }
   });
 
   // ─── WORKERS CRUD ───────────────────────────────────────────────────────────
@@ -1967,19 +2419,134 @@ async function startServer() {
   });
 
   // ─── FEED TYPES ─────────────────────────────────────────────────────────────
+  app.get("/api/feed-price", async (_req, res) => {
+    const result = await db.execute("SELECT sack_price FROM feed_settings WHERE id = 1");
+    res.json({ price: Number(result.rows[0]?.sack_price || 1400) });
+  });
+
+  app.put("/api/feed-price", async (req, res) => {
+    const price = Number(req.body.price);
+    if (!Number.isFinite(price) || price <= 0) return res.status(400).json({ message: "Enter a valid sack price" });
+    await db.execute({ sql: "UPDATE feed_settings SET sack_price = ? WHERE id = 1", args: [price] });
+    res.json({ success: true, price });
+  });
+
+  app.get("/api/feed-reductions", async (req, res) => {
+    const customerId = typeof req.query.customerId === "string" ? req.query.customerId : undefined;
+    const vendorId = typeof req.query.vendorId === "string" ? req.query.vendorId : undefined;
+    let sql = `SELECT r.*, c.name as customer_name
+               FROM feed_reductions r JOIN customers c ON r.customer_id = c.id`;
+    const args: any[] = [];
+    if (customerId) {
+      sql += " WHERE r.customer_id = ?";
+      args.push(customerId);
+    } else if (vendorId) {
+      sql += " WHERE c.vendor_id = ?";
+      args.push(vendorId);
+    }
+    sql += " ORDER BY r.month DESC";
+    const result = await db.execute({ sql, args });
+    res.json(result.rows);
+  });
+
+  app.post("/api/feed-reductions", async (req, res) => {
+    const { customer_id, month } = req.body;
+    const items = req.body.items;
+    const feedTypeIds = Array.isArray(items) ? items.map((item: any) => String(item.feed_type_id)) : [];
+    if (!customer_id || !/^\d{4}-\d{2}$/.test(month || "") || !Array.isArray(items) || new Set(feedTypeIds).size !== feedTypeIds.length || items.some((item: any) =>
+      !Number.isInteger(Number(item.feed_type_id)) || !Number.isInteger(Number(item.quantity)) || Number(item.quantity) < 0
+    )) {
+      return res.status(400).json({ message: "Enter a valid month and whole number of sacks for each feed type" });
+    }
+
+    const [purchases, previousReductions, currentLegacy, feedRates] = await Promise.all([
+      db.execute({ sql: "SELECT COALESCE(SUM(quantity), 0) as quantity, COALESCE(SUM(amount), 0) as amount FROM feed_purchases WHERE customer_id = ? AND date < ?", args: [customer_id, `${month}-32`] }),
+      db.execute({ sql: "SELECT COALESCE(SUM(quantity), 0) as quantity, COALESCE(SUM(amount), 0) as amount FROM feed_reductions WHERE customer_id = ? AND month < ?", args: [customer_id, month] }),
+      db.execute({ sql: "SELECT COALESCE(SUM(quantity), 0) as quantity FROM feed_reductions WHERE customer_id = ? AND month = ? AND feed_type_id IS NULL", args: [customer_id, month] }),
+      db.execute("SELECT id, rate FROM feed_types"),
+    ]);
+    const available = Number(purchases.rows[0]?.quantity || 0) - Number(previousReductions.rows[0]?.quantity || 0);
+    const quantity = items.reduce((sum: number, item: any) => sum + Number(item.quantity), 0);
+    if (quantity + Number(currentLegacy.rows[0]?.quantity || 0) > available) {
+      return res.status(400).json({ message: `Only ${Math.max(0, available)} sacks are available` });
+    }
+    const rates = new Map(feedRates.rows.map((row: any) => [String(row.id), Number(row.rate)]));
+    const reductionRows: { feedTypeId: string; quantity: number; unitPrice: number; amount: number }[] = [];
+    for (const item of items) {
+      const feedTypeId = String(item.feed_type_id);
+      const feedRate = rates.get(feedTypeId);
+      if (!feedRate) return res.status(400).json({ message: "A selected feed type no longer exists" });
+      const [typePurchases, typeReductions, carryoverPurchases] = await Promise.all([
+        db.execute({ sql: "SELECT COALESCE(SUM(quantity), 0) as quantity, COALESCE(SUM(amount), 0) as amount FROM feed_purchases WHERE customer_id = ? AND feed_type_id = ? AND date < ?", args: [customer_id, feedTypeId, `${month}-32`] }),
+        db.execute({ sql: "SELECT COALESCE(SUM(quantity), 0) as quantity, COALESCE(SUM(amount), 0) as amount FROM feed_reductions WHERE customer_id = ? AND feed_type_id = ? AND month < ?", args: [customer_id, feedTypeId, month] }),
+        db.execute({ sql: "SELECT COALESCE(SUM(quantity), 0) as quantity FROM feed_purchases WHERE customer_id = ? AND feed_type_id = ? AND date < ?", args: [customer_id, feedTypeId, `${month}-01`] }),
+      ]);
+      const typeAvailable = Number(typePurchases.rows[0]?.quantity || 0) - Number(typeReductions.rows[0]?.quantity || 0);
+      const carryover = Math.max(0, Number(carryoverPurchases.rows[0]?.quantity || 0) - Number(typeReductions.rows[0]?.quantity || 0));
+      if (Number(item.quantity) < carryover) {
+        return res.status(400).json({ message: `At least ${carryover} carryover sacks of this feed type must be billed` });
+      }
+      if (Number(item.quantity) > typeAvailable) {
+        return res.status(400).json({ message: `Only ${Math.max(0, typeAvailable)} sacks of this feed type are available` });
+      }
+      const typeValue = Number(typePurchases.rows[0]?.amount || 0) - Number(typeReductions.rows[0]?.amount || 0);
+      const unitPrice = typeAvailable > 0 ? typeValue / typeAvailable : feedRate;
+      const itemQuantity = Number(item.quantity);
+      reductionRows.push({ feedTypeId, quantity: itemQuantity, unitPrice, amount: itemQuantity * unitPrice });
+    }
+    for (const reduction of reductionRows) {
+      await db.execute({
+        sql: `INSERT INTO feed_reductions (customer_id, feed_type_id, month, quantity, unit_price, amount)
+              VALUES (?, ?, ?, ?, ?, ?)
+              ON CONFLICT(customer_id, month, feed_type_id) DO UPDATE SET quantity = excluded.quantity, unit_price = excluded.unit_price, amount = excluded.amount`,
+        args: [customer_id, reduction.feedTypeId, month, reduction.quantity, reduction.unitPrice, reduction.amount],
+      });
+    }
+    const submittedTypeIds = items.map((item: any) => String(item.feed_type_id));
+    const existing = await db.execute({ sql: "SELECT id, feed_type_id FROM feed_reductions WHERE customer_id = ? AND month = ? AND feed_type_id IS NOT NULL", args: [customer_id, month] });
+    for (const row of existing.rows as any[]) {
+      if (!submittedTypeIds.includes(String(row.feed_type_id))) {
+        await db.execute({ sql: "DELETE FROM feed_reductions WHERE id = ?", args: [row.id] });
+      }
+    }
+    const savedReduction = await db.execute({
+      sql: "SELECT r.*, c.name as customer_name FROM feed_reductions r JOIN customers c ON c.id = r.customer_id WHERE r.customer_id = ? AND r.month = ? ORDER BY r.feed_type_id",
+      args: [customer_id, month],
+    });
+    res.json({ success: true, reductions: savedReduction.rows });
+  });
+
+  app.delete("/api/feed-reductions/:customerId/:month", async (req, res) => {
+    const customerId = Number(req.params.customerId);
+    const month = req.params.month;
+    if (!Number.isInteger(customerId) || customerId <= 0 || !/^\d{4}-\d{2}$/.test(month)) {
+      return res.status(400).json({ message: "Invalid customer or month" });
+    }
+    const result = await db.execute({
+      sql: "DELETE FROM feed_reductions WHERE customer_id = ? AND month = ?",
+      args: [customerId, month],
+    });
+    if (result.rowsAffected === 0) return res.status(404).json({ message: "No monthly feed reduction was found" });
+    res.json({ success: true, deleted: result.rowsAffected });
+  });
+
   app.get("/api/feed-types", async (_req, res) => {
     const result = await db.execute("SELECT * FROM feed_types ORDER BY name ASC");
     res.json(result.rows);
   });
 
   app.post("/api/feed-types", async (req, res) => {
-    const { name, rate } = req.body;
+    const { name } = req.body;
+    const rate = Number(req.body.rate);
+    if (!String(name || '').trim() || !Number.isFinite(rate) || rate <= 0) return res.status(400).json({ message: "Enter a feed name and valid rate" });
     const result = await db.execute({ sql: "INSERT INTO feed_types (name, rate) VALUES (?, ?)", args: [name, rate] });
     res.json({ id: result.lastInsertRowid !== undefined ? Number(result.lastInsertRowid) : null });
   });
 
   app.put("/api/feed-types/:id", async (req, res) => {
-    const { name, rate } = req.body;
+    const { name } = req.body;
+    const rate = Number(req.body.rate);
+    if (!String(name || '').trim() || !Number.isFinite(rate) || rate <= 0) return res.status(400).json({ message: "Enter a feed name and valid rate" });
     await db.execute({ sql: "UPDATE feed_types SET name = ?, rate = ? WHERE id = ?", args: [name, rate, req.params.id] });
     res.json({ success: true });
   });
@@ -2027,14 +2594,19 @@ async function startServer() {
 
   app.post("/api/feed-purchases", async (req, res) => {
     const { customer_id, feed_type_id, date, quantity } = req.body;
+    const sackQuantity = Number(quantity);
+    if (!customer_id || !feed_type_id || !date || !Number.isInteger(sackQuantity) || sackQuantity <= 0) {
+      return res.status(400).json({ message: "Enter a valid purchase date and whole number of sacks" });
+    }
     const ft = await db.execute({ sql: "SELECT rate FROM feed_types WHERE id = ?", args: [feed_type_id] });
     if (!ft.rows[0]) return res.status(404).json({ message: "Feed type not found" });
-    const amount = quantity * (ft.rows[0].rate as number);
+    const unitPrice = Number(ft.rows[0].rate);
+    const amount = roundCurrency(sackQuantity * unitPrice);
     const result = await db.execute({
-      sql: "INSERT INTO feed_purchases (customer_id, feed_type_id, date, quantity, amount) VALUES (?, ?, ?, ?, ?)",
-      args: [customer_id, feed_type_id, date, quantity, amount],
+      sql: "INSERT INTO feed_purchases (customer_id, feed_type_id, date, quantity, amount, unit_price) VALUES (?, ?, ?, ?, ?, ?)",
+      args: [customer_id, feed_type_id, date, sackQuantity, amount, unitPrice],
     });
-    res.json({ id: result.lastInsertRowid !== undefined ? Number(result.lastInsertRowid) : null });
+    res.json({ id: result.lastInsertRowid !== undefined ? Number(result.lastInsertRowid) : null, unit_price: unitPrice, amount });
   });
 
   app.delete("/api/feed-purchases/:id", async (req, res) => {
@@ -2184,6 +2756,12 @@ async function startServer() {
     }
   }
 
+  const shouldBillFeedReduction = (cycle: string | undefined, startDate: string) => {
+    if (cycle === '11-20' || cycle === '21-end') return false;
+    if (cycle === 'custom') return startDate.endsWith('-01');
+    return true;
+  };
+
   app.get("/api/billing/:month", async (req, res) => {
     const month = req.params.month;
     const { startDate, endDate } = getDateRange(
@@ -2192,6 +2770,7 @@ async function startServer() {
       req.query.startDate as string,
       req.query.endDate as string
     );
+    const includeFeedReduction = shouldBillFeedReduction(req.query.cycle as string | undefined, startDate);
     const authHeader = req.headers.authorization;
     let worker_id: number | null = null;
     let vendor_id: number | null = null;
@@ -2213,7 +2792,7 @@ async function startServer() {
 
     let sql = `SELECT
               c.id as customer_id, c.name, c.phone, c.upi_id, c.bank_name, c.account_number, c.ifsc_code, c.customer_code,
-              COALESCE(c.cattle_feed_reduction, 0) as cattle_feed_reduction,
+              COALESCE((SELECT SUM(amount) FROM feed_reductions WHERE customer_id = c.id AND month >= ? AND month <= ? AND ? = 1), 0) as cattle_feed_reduction,
               COALESCE(SUM(e.liters), 0) as total_liters,
               COALESCE(SUM(e.amount), 0) as total_amount,
               COALESCE((SELECT SUM(amount) FROM advances WHERE customer_id = c.id AND date >= ? AND date <= ? AND type = 'advance'), 0) as total_advance,
@@ -2223,7 +2802,7 @@ async function startServer() {
                COALESCE((SELECT SUM(amount) FROM advances WHERE customer_id = c.id AND type = 'deduction'), 0)) as advance_balance
             FROM customers c
             LEFT JOIN milk_entries e ON c.id = e.customer_id AND e.date >= ? AND e.date <= ? ${worker_id ? "AND e.worker_id = ?" : ""}`;
-    const args: any[] = [startDate, endDate, startDate, endDate, startDate, endDate, startDate, endDate];
+    const args: any[] = [startDate.slice(0, 7), endDate.slice(0, 7), includeFeedReduction ? 1 : 0, startDate, endDate, startDate, endDate, startDate, endDate, startDate, endDate];
     if (worker_id) {
       args.push(worker_id);
     }
@@ -2254,6 +2833,7 @@ async function startServer() {
       req.query.startDate as string,
       req.query.endDate as string
     );
+    const includeFeedReduction = shouldBillFeedReduction(req.query.cycle as string | undefined, startDate);
     const authHeader = req.headers.authorization;
     let worker_id: number | null = null;
     if (authHeader) {
@@ -2271,10 +2851,11 @@ async function startServer() {
       : "SELECT date, shift, liters, fat, snf, rate, amount FROM milk_entries WHERE customer_id = ? AND date >= ? AND date <= ? ORDER BY date ASC, shift ASC";
     const milkArgs = worker_id ? [customerId, startDate, endDate, worker_id] : [customerId, startDate, endDate];
 
-    const [milkR, advR, feedR, borrR, repR, payR] = await Promise.all([
+    const [milkR, advR, feedR, feedReductionR, borrR, repR, payR] = await Promise.all([
       db.execute({ sql: milkSql, args: milkArgs }),
       db.execute({ sql: "SELECT id, date, amount, type FROM advances WHERE customer_id = ? AND date >= ? AND date <= ? ORDER BY date ASC", args: [customerId, startDate, endDate] }),
-      db.execute({ sql: "SELECT p.id, p.date, p.quantity, p.amount, t.name as feed_name FROM feed_purchases p JOIN feed_types t ON p.feed_type_id = t.id WHERE p.customer_id = ? AND p.date >= ? AND p.date <= ? ORDER BY p.date ASC", args: [customerId, startDate, endDate] }),
+      db.execute({ sql: "SELECT p.id, p.date, p.quantity, p.unit_price, p.amount, t.name as feed_name FROM feed_purchases p JOIN feed_types t ON p.feed_type_id = t.id WHERE p.customer_id = ? AND p.date >= ? AND p.date <= ? ORDER BY p.date ASC", args: [customerId, startDate, endDate] }),
+      db.execute({ sql: "SELECT id, month, quantity, unit_price, amount FROM feed_reductions WHERE customer_id = ? AND month >= ? AND month <= ? AND ? = 1 ORDER BY month ASC", args: [customerId, startDate.slice(0, 7), endDate.slice(0, 7), includeFeedReduction ? 1 : 0] }),
       db.execute({ sql: "SELECT SUM(amount) as total FROM advances WHERE customer_id = ? AND type = 'advance'", args: [customerId] }),
       db.execute({ sql: "SELECT SUM(amount) as total FROM advances WHERE customer_id = ? AND type = 'deduction'", args: [customerId] }),
       db.execute({ sql: "SELECT * FROM payments WHERE recipient_type = 'customer' AND recipient_id = ? AND date >= ? AND date <= ? ORDER BY date DESC", args: [customerId, startDate, endDate] }),
@@ -2287,6 +2868,7 @@ async function startServer() {
       milkEntries: milkR.rows,
       advances: advR.rows,
       feedPurchases: feedR.rows,
+      feedReductions: feedReductionR.rows,
       payments: payR.rows,
       advanceBalance: ((borrR.rows[0]?.total as number) || 0) - ((repR.rows[0]?.total as number) || 0),
     });

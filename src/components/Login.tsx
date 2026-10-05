@@ -325,22 +325,23 @@ export default function Login({ onLogin }: LoginProps) {
   const isForgotPassword = forgotMode !== null;
 
   return (
-    <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
+    <div className="min-h-[100dvh] overflow-y-auto bg-slate-50 flex items-center justify-center p-3 sm:p-4">
       <motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
-        className="w-full max-w-md bg-white rounded-3xl shadow-xl border border-slate-100 overflow-hidden"
+        className="w-full max-w-md bg-white rounded-2xl sm:rounded-3xl shadow-xl border border-slate-100 overflow-hidden my-auto"
       >
         {/* Header */}
-        <div className="p-8 bg-emerald-600 text-white text-center">
+        <div className="p-6 sm:p-8 bg-emerald-600 text-white text-center">
           <div
             onClick={handleLogoClick}
-            className="w-20 h-20 bg-white rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-lg overflow-hidden border-2 border-emerald-500/20 cursor-pointer active:scale-95 transition-all select-none"
+            className="relative w-24 h-20 sm:w-28 sm:h-24 flex items-center justify-center mx-auto mb-3 cursor-pointer active:scale-95 transition-all select-none"
           >
-            <img src="/logo.jpg" alt="DairyFlow Logo" className="w-full h-full object-cover" />
+            <div className="absolute -inset-3 rounded-full bg-emerald-400/20 blur-xl" />
+            <img src="/new%20dairy%20flow.png" alt="DairyFlow Logo" className="relative z-10 max-h-full max-w-full object-contain drop-shadow-[0_8px_16px_rgba(6,78,59,0.28)]" />
           </div>
-          <h2 className="text-2xl font-bold">{t('portalTitle')}</h2>
-          <p className="text-emerald-100 text-sm mt-1">
+          <h2 className="text-xl sm:text-2xl font-bold">{t('portalTitle')}</h2>
+          <p className="text-emerald-100 text-xs sm:text-sm mt-1">
             {vendorRequestMode ? 'Request Vendor Access' : isForgotPassword ? 'Reset Password' : t('signInToYourAccount')}
           </p>
         </div>
@@ -349,20 +350,20 @@ export default function Login({ onLogin }: LoginProps) {
         {!isForgotPassword && !vendorRequestMode && (
           <div className="flex border-b border-slate-100">
             <button onClick={() => switchTab('customer')}
-              className={`flex-1 py-3.5 text-xs font-semibold transition-colors ${loginType === 'customer' ? 'text-emerald-600 border-b-2 border-emerald-600 bg-emerald-50/50' : 'text-slate-500 hover:text-slate-700 hover:bg-slate-50'}`}>
+              className={`flex-1 py-3 sm:py-3.5 text-xs font-semibold transition-colors ${loginType === 'customer' ? 'text-emerald-600 border-b-2 border-emerald-600 bg-emerald-50/50' : 'text-slate-500 hover:text-slate-700 hover:bg-slate-50'}`}>
               🌾 {t('customerLogin')}
             </button>
             <button onClick={() => switchTab('vendor')}
-              className={`flex-1 py-3.5 text-xs font-semibold transition-colors ${loginType === 'vendor' ? 'text-emerald-600 border-b-2 border-emerald-600 bg-emerald-50/50' : 'text-slate-500 hover:text-slate-700 hover:bg-slate-50'}`}>
+              className={`flex-1 py-3 sm:py-3.5 text-xs font-semibold transition-colors ${loginType === 'vendor' ? 'text-emerald-600 border-b-2 border-emerald-600 bg-emerald-50/50' : 'text-slate-500 hover:text-slate-700 hover:bg-slate-50'}`}>
               🏪 Vendor
             </button>
             <button onClick={() => switchTab('worker')}
-              className={`flex-1 py-3.5 text-xs font-semibold transition-colors ${loginType === 'worker' ? 'text-emerald-600 border-b-2 border-emerald-600 bg-emerald-50/50' : 'text-slate-500 hover:text-slate-700 hover:bg-slate-50'}`}>
+              className={`flex-1 py-3 sm:py-3.5 text-xs font-semibold transition-colors ${loginType === 'worker' ? 'text-emerald-600 border-b-2 border-emerald-600 bg-emerald-50/50' : 'text-slate-500 hover:text-slate-700 hover:bg-slate-50'}`}>
               👷 Worker
             </button>
             {showAdminTab && (
               <button onClick={() => switchTab('admin')}
-                className={`flex-1 py-3.5 text-xs font-semibold transition-colors ${loginType === 'admin' ? 'text-emerald-600 border-b-2 border-emerald-600 bg-emerald-50/50' : 'text-slate-500 hover:text-slate-700 hover:bg-slate-50'}`}>
+                className={`flex-1 py-3 sm:py-3.5 text-xs font-semibold transition-colors ${loginType === 'admin' ? 'text-emerald-600 border-b-2 border-emerald-600 bg-emerald-50/50' : 'text-slate-500 hover:text-slate-700 hover:bg-slate-50'}`}>
                 🛡️ {t('adminLogin')}
               </button>
             )}
@@ -370,11 +371,11 @@ export default function Login({ onLogin }: LoginProps) {
         )}
 
         {!isForgotPassword && !vendorRequestMode && loginType === 'vendor' && (
-          <div className="relative z-10 block px-5 pt-4 sm:px-8">
+          <div className="relative z-10 block px-4 pt-3 sm:px-8 sm:pt-4">
             <button
               type="button"
               onClick={() => { setLoginType('vendor'); setError(''); setMessage(''); setVendorRequestMode(true); }}
-              className="flex min-h-12 w-full items-center justify-center gap-2 rounded-xl border border-dashed border-emerald-300 bg-emerald-50/60 px-3 py-3 text-center text-sm font-semibold leading-snug text-emerald-700 transition-all hover:bg-emerald-50"
+              className="flex min-h-12 w-full items-center justify-center gap-2 rounded-xl border border-dashed border-emerald-300 bg-emerald-50/60 px-3 py-3 text-center text-xs sm:text-sm font-semibold leading-snug text-emerald-700 transition-all hover:bg-emerald-50"
             >
               <ClipboardList size={16} className="shrink-0" />
               <span>Need a vendor account? Request access from admin</span>
@@ -382,7 +383,7 @@ export default function Login({ onLogin }: LoginProps) {
           </div>
         )}
 
-        <div className="p-8">
+        <div className="p-4 sm:p-8">
           {/* Error */}
           <AnimatePresence>
             {error && (
@@ -723,6 +724,15 @@ export default function Login({ onLogin }: LoginProps) {
               </motion.div>
             )}
           </AnimatePresence>
+
+          {/* Santrix Footer Logo */}
+          <div className="pt-3 pb-1 text-center">
+            <img
+              src="/santrix%20logo.png"
+              alt="Powered by Santrix Technologies"
+              className="mx-auto h-10 sm:h-12 w-auto max-w-[70%] object-contain drop-shadow-[0_1px_0_rgba(16,185,129,0.15)]"
+            />
+          </div>
         </div>
       </motion.div>
     </div>

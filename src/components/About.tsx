@@ -92,6 +92,7 @@ export default function About({ vendorName, vendorPhone, vendorAddress }: AboutP
 
       <footer className="text-center text-slate-400 text-sm">
         <p>© 2026 DairyFlow Management System. All rights reserved.</p>
+        <p className="mt-1 text-xs font-medium text-slate-500">Powered by SANTRIX TECH</p>
       </footer>
 
       {showSupport && (

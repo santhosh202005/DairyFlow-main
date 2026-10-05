@@ -16,6 +16,7 @@ import {
   Package,
   Layers
 } from 'lucide-react';
+import { useTranslation } from '../i18n';
 
 interface UserManualProps {
   userRole?: string;
@@ -318,7 +319,7 @@ const generalLanguageContent = {
 };
 
 export default function UserManual({ userRole }: UserManualProps) {
-  const [language, setLanguage] = useState<'en' | 'ta'>('en');
+  const { lang: language, setLang } = useTranslation();
   const isCustomer = userRole === 'customer';
 
   const [audience, setAudience] = useState<'all' | 'customer' | 'vendor'>(
@@ -349,12 +350,12 @@ export default function UserManual({ userRole }: UserManualProps) {
             <div className="flex flex-wrap items-center gap-2 print:hidden">
               <button
                 onClick={() => window.print()}
-                className="inline-flex items-center gap-2 rounded-xl bg-white text-emerald-700 px-4 py-2 font-semibold shadow-sm hover:bg-emerald-50 transition"
+                className="inline-flex w-full md:w-auto items-center justify-center gap-2 rounded-xl bg-white text-emerald-700 px-4 py-2 font-semibold shadow-sm hover:bg-emerald-50 transition"
               >
                 <Printer className="h-4 w-4" /> {content.printBtn}
               </button>
               <button
-                onClick={() => setLanguage('en')}
+                onClick={() => setLang('en')}
                 className={`rounded-xl px-3 py-2 text-sm font-semibold transition ${
                   language === 'en' ? 'bg-white text-emerald-700' : 'bg-white/10 text-white hover:bg-white/15'
                 }`}
@@ -362,7 +363,7 @@ export default function UserManual({ userRole }: UserManualProps) {
                 English
               </button>
               <button
-                onClick={() => setLanguage('ta')}
+                onClick={() => setLang('ta')}
                 className={`rounded-xl px-3 py-2 text-sm font-semibold transition ${
                   language === 'ta' ? 'bg-white text-emerald-700' : 'bg-white/10 text-white hover:bg-white/15'
                 }`}
@@ -497,6 +498,7 @@ export default function UserManual({ userRole }: UserManualProps) {
             <span>{content.printNote}</span>
           </div>
         </section>
+
       </div>
     );
   }
@@ -530,12 +532,12 @@ export default function UserManual({ userRole }: UserManualProps) {
           <div className="flex flex-wrap items-center gap-2 print:hidden">
             <button
               onClick={() => window.print()}
-              className="inline-flex items-center gap-2 rounded-xl bg-white text-emerald-700 px-4 py-2 font-semibold shadow-sm hover:bg-emerald-50 transition"
+              className="inline-flex w-full md:w-auto items-center justify-center gap-2 rounded-xl bg-white text-emerald-700 px-4 py-2 font-semibold shadow-sm hover:bg-emerald-50 transition"
             >
               <Printer className="h-4 w-4" /> {content.printBtn}
             </button>
             <button
-              onClick={() => setLanguage('en')}
+              onClick={() => setLang('en')}
               className={`rounded-xl px-3 py-2 text-sm font-semibold transition ${
                 language === 'en' ? 'bg-white text-emerald-700' : 'bg-white/10 text-white hover:bg-white/15'
               }`}
@@ -543,7 +545,7 @@ export default function UserManual({ userRole }: UserManualProps) {
               English
             </button>
             <button
-              onClick={() => setLanguage('ta')}
+              onClick={() => setLang('ta')}
               className={`rounded-xl px-3 py-2 text-sm font-semibold transition ${
                 language === 'ta' ? 'bg-white text-emerald-700' : 'bg-white/10 text-white hover:bg-white/15'
               }`}
@@ -696,6 +698,8 @@ export default function UserManual({ userRole }: UserManualProps) {
           <span>{content.printNote}</span>
         </div>
       </section>
+
+      <p className="text-center text-xs font-medium text-slate-500">Powered by SANTRIX TECH</p>
     </div>
   );
 }

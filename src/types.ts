@@ -106,6 +106,19 @@ export interface FeedPurchase {
   feed_name: string;
   date: string;
   quantity: number;
+  unit_price?: number;
+  amount: number;
+  created_at: string;
+}
+
+export interface FeedReduction {
+  id: string;
+  customer_id: string;
+  feed_type_id?: string | number | null;
+  customer_name?: string;
+  month: string;
+  quantity: number;
+  unit_price: number;
   amount: number;
   created_at: string;
 }
@@ -188,5 +201,34 @@ export interface VendorRequest {
   admin_note?: string;
   created_at: string;
   reviewed_at?: string;
+}
+
+export interface MissingEntryItem {
+  customerId?: number;
+  customerName?: string;
+  customerCode?: string;
+  shift: 'AM' | 'PM';
+  label: string;
+  detail: string;
+  status?: 'pending';
+}
+
+export interface MissingEntriesResponse {
+  role: 'customer' | 'vendor' | 'admin' | 'worker' | 'unknown';
+  date: string;
+  customerId?: number;
+  customerName?: string;
+  vendorId?: number;
+  vendorName?: string;
+  isApplicable: boolean;
+  count: number;
+  amMissing?: boolean;
+  pmMissing?: boolean;
+  amMissingCount?: number;
+  pmMissingCount?: number;
+  title?: string;
+  message?: string;
+  reason?: string;
+  entries: MissingEntryItem[];
 }
 

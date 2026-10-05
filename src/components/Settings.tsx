@@ -1,8 +1,7 @@
 import { useState } from 'react';
-import { User, FileText, Info, LogOut, MapPin, Phone, Settings as SettingsIcon, Shield } from 'lucide-react';
+import { User, Info, LogOut, MapPin, Phone, Settings as SettingsIcon, Shield } from 'lucide-react';
 
 import { motion } from 'motion/react';
-import Billing from './Billing';
 import About from './About';
 
 import { getStoredLanguage, setStoredLanguage } from '../auth';
@@ -31,7 +30,7 @@ interface SettingsProps {
   onProfileUpdate?: (profilePicture: string) => void;
 }
 
-type TabType = 'profile' | 'reports' | 'about' | 'logout';
+type TabType = 'profile' | 'about' | 'logout';
 
 
 export default function Settings({ authData, onLogout, onProfileUpdate }: SettingsProps) {
@@ -42,9 +41,6 @@ export default function Settings({ authData, onLogout, onProfileUpdate }: Settin
 
   const tabs = [
     { id: 'profile' as TabType, label: t('profileInfo'), icon: User },
-    ...(authData.role !== 'admin' && authData.role !== 'worker' ? [
-      { id: 'reports' as TabType, label: t('myReports'), icon: FileText },
-    ] : []),
     ...(authData.role !== 'admin' ? [
       { id: 'about' as TabType, label: t('about'), icon: Info },
     ] : []),
@@ -258,7 +254,7 @@ export default function Settings({ authData, onLogout, onProfileUpdate }: Settin
                     {authData.role !== 'admin' && (
                       <div>
                         <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">{t('assignedMilkPriceRate')}</p>
-                        <p className="text-xl font-display font-bold text-emerald-600">₹{authData.defaultRate?.toFixed(2)} / Litre</p>
+                        <p className="text-xl font-display font-bold text-emerald-600">₹{authData.defaultRate?.toFixed(2)} / {t('litre')}</p>
                         <p className="text-[9px] text-slate-400 font-bold mt-1 uppercase">{t('standardQualityMultiplier')}</p>
                       </div>
                     )}
@@ -293,22 +289,6 @@ export default function Settings({ authData, onLogout, onProfileUpdate }: Settin
                   </div>
                 </div>
               </div>
-            </motion.div>
-          )}
-
-          {/* Reports Tab */}
-          {activeTab === 'reports' && authData.role !== 'admin' && authData.role !== 'worker' && (
-            <motion.div
-
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-            >
-              <Billing 
-                customerId={authData.customerId} 
-                isWorker={authData.role === 'worker'}
-                workerId={authData.workerId}
-                isCustomer={authData.role === 'customer'}
-              />
             </motion.div>
           )}
 

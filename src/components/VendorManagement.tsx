@@ -5,6 +5,7 @@ import {
   Phone, MapPin, TrendingUp, ChevronDown, AlertTriangle, Search, ShieldCheck, ClipboardList
 } from 'lucide-react';
 import { apiFetch } from '../api';
+import { CardGridSkeleton } from './Skeleton';
 
 
 interface Vendor {
@@ -228,9 +229,7 @@ export default function VendorManagement({ onNavigateToRequests }: { onNavigateT
 
       {/* Vendor Cards */}
       {loading ? (
-        <div className="flex items-center justify-center py-20">
-          <div className="w-8 h-8 border-4 border-emerald-200 border-t-emerald-600 rounded-full animate-spin" />
-        </div>
+        <CardGridSkeleton count={6} />
       ) : filtered.length === 0 ? (
         <motion.div
           initial={{ opacity: 0 }}

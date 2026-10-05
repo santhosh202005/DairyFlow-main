@@ -5,6 +5,7 @@ import { Customer } from '../types';
 import MilkEntries from './MilkEntries';
 import SearchBar from './SearchBar';
 import { useDebouncedValue } from '../hooks/useDebouncedValue';
+import { CardGridSkeleton, TableSkeleton } from './Skeleton';
 
 interface CustomersProps {
   vendorId?: string;
@@ -20,6 +21,7 @@ const getAuthHeaders = (): Record<string, string> => {
 export default function Customers({ vendorId, isVendor, readOnly = false }: CustomersProps) {
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [vendorOverview, setVendorOverview] = useState<any[] | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [historyCustomerId, setHistoryCustomerId] = useState<string | null>(null);
   const [editingCustomer, setEditingCustomer] = useState<Customer | null>(null);
@@ -41,6 +43,7 @@ export default function Customers({ vendorId, isVendor, readOnly = false }: Cust
   });
 
   useEffect(() => {
+    setIsLoading(true);
     if (readOnly) {
       // Admin: fetch vendor overview (counts per vendor)
       fetch('/api/admin/overview', { headers: getAuthHeaders() })
@@ -48,7 +51,8 @@ export default function Customers({ vendorId, isVendor, readOnly = false }: Cust
         .then((data) => {
           setVendorOverview(data.vendors || []);
         })
-        .catch(() => setVendorOverview([]));
+        .catch(() => setVendorOverview([]))
+        .finally(() => setIsLoading(false));
     } else {
       fetchCustomers();
     }
@@ -57,8 +61,17 @@ export default function Customers({ vendorId, isVendor, readOnly = false }: Cust
   const fetchCustomers = () => {
     const url = vendorId ? `/api/customers?vendorId=${vendorId}` : '/api/customers';
     fetch(url, { headers: getAuthHeaders() })
-      .then(res => res.json())
-      .then(data => setCustomers(data));
+      .then(async res => {
+        const data = await res.json();
+        if (!res.ok) throw new Error(data?.message || `Customer request failed (${res.status})`);
+        return data;
+      })
+      .then(data => setCustomers(Array.isArray(data) ? data : []))
+      .catch(err => {
+        console.error('[Customers] Customer list load failed:', err);
+        setCustomers([]);
+      })
+      .finally(() => setIsLoading(false));
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -130,8 +143,12 @@ export default function Customers({ vendorId, isVendor, readOnly = false }: Cust
         )}
       </div>
 
-      {/* If admin (readOnly) show vendor-wise farmer counts, else show customers list */}
-      {readOnly ? (
+      {isLoading ? (
+        readOnly ? <CardGridSkeleton count={3} /> : <TableSkeleton rows={6} cols={4} />
+      ) : (
+        <>
+          {/* If admin (readOnly) show vendor-wise farmer counts, else show customers list */}
+          {readOnly ? (
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
           {(filteredVendors.length === 0) ? (
             <div className="bg-white rounded-2xl border border-slate-100 p-8 text-center col-span-full">
@@ -319,6 +336,8 @@ export default function Customers({ vendorId, isVendor, readOnly = false }: Cust
               </motion.div>
             ))}
           </div>
+        </>
+          )}
         </>
       )}
 

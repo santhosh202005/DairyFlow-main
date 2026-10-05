@@ -3,6 +3,7 @@ import { User, Phone, Plus, Edit2, Trash2, Search, IndianRupee, TrendingDown, Ch
 import { motion, AnimatePresence } from 'motion/react';
 import { Worker, WorkerSalarySummary } from '../types';
 import { useTranslation } from '../i18n';
+import { TableRowSkeleton } from './Skeleton';
 
 interface WorkerManagementProps {
   vendorId?: string;
@@ -58,7 +59,11 @@ export default function WorkerManagement({ vendorId }: WorkerManagementProps) {
   };
 
   const fetchWorkers = async () => {
-    if (!vendorId) return;
+    if (!vendorId) {
+      setWorkers([]);
+      setIsLoading(false);
+      return;
+    }
     setIsLoading(true);
     try {
       const res = await fetch(`/api/workers?vendorId=${vendorId}`, { headers: getAuthHeaders() });
@@ -250,7 +255,7 @@ export default function WorkerManagement({ vendorId }: WorkerManagementProps) {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-50">
-                  {filteredWorkers.map((worker) => (
+                  {isLoading ? Array.from({ length: 5 }).map((_, index) => <TableRowSkeleton key={index} cols={7} />) : filteredWorkers.map((worker) => (
                     <tr key={worker.id} className="hover:bg-slate-50/30 transition-all group">
                       <td className="px-6 py-5">
                         <div className="flex items-center gap-3">
@@ -294,7 +299,7 @@ export default function WorkerManagement({ vendorId }: WorkerManagementProps) {
                       </td>
                     </tr>
                   ))}
-                  {filteredWorkers.length === 0 && (
+                  {!isLoading && filteredWorkers.length === 0 && (
                     <tr><td colSpan={7} className="py-16 text-center text-slate-400 italic text-sm">{isLoading ? t('loadingWorkers') : t('noWorkersFound')}</td></tr>
                   )}
                 </tbody>
@@ -303,7 +308,9 @@ export default function WorkerManagement({ vendorId }: WorkerManagementProps) {
 
             {/* Mobile Cards */}
             <div className="sm:hidden space-y-3">
-              {filteredWorkers.map((worker) => (
+              {isLoading ? Array.from({ length: 4 }).map((_, index) => (
+                <div key={index} className="h-32 rounded-2xl bg-slate-100 animate-pulse" />
+              )) : filteredWorkers.map((worker) => (
                 <div key={worker.id} className="bg-white rounded-2xl border border-slate-100 p-4 shadow-soft space-y-3">
                   <div className="flex justify-between items-start">
                     <div className="flex items-center gap-3">
@@ -338,7 +345,7 @@ export default function WorkerManagement({ vendorId }: WorkerManagementProps) {
                   </div>
                 </div>
               ))}
-              {filteredWorkers.length === 0 && (
+              {!isLoading && filteredWorkers.length === 0 && (
                 <div className="bg-white rounded-2xl border border-slate-100 p-8 text-center text-slate-400 italic text-sm">
                   {isLoading ? t('loading') : t('noWorkersFound')}
                 </div>

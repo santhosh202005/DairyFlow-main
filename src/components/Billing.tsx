@@ -17,8 +17,13 @@ import {
   Banknote,
   SlidersHorizontal,
   Clock,
-  Sparkles
+  Sparkles,
+  Pencil,
+  CheckCircle,
+  AlertTriangle,
+  X as XIcon
 } from 'lucide-react';
+
 import * as XLSX from 'xlsx';
 import { BillingRecord, BillingCycle } from '../types';
 import { motion } from 'motion/react';
@@ -40,8 +45,9 @@ const getAuthHeaders = (): Record<string, string> => {
 };
 
 export default function Billing({ customerId, isWorker = false, workerId, isCustomer = false }: BillingProps) {
-  const { t } = useTranslation();
+  const { t, lang } = useTranslation();
   const [billingData, setBillingData] = useState<BillingRecord[]>([]);
+  const [isLoadingBilling, setIsLoadingBilling] = useState(false);
   const [detailedData, setDetailedData] = useState<{
     customer?: any;
     startDate?: string;
@@ -49,6 +55,7 @@ export default function Billing({ customerId, isWorker = false, workerId, isCust
     milkEntries: any[];
     advances: any[];
     feedPurchases: any[];
+    feedReductions: any[];
     payments?: any[];
     advanceBalance?: number;
   } | null>(null);
@@ -77,7 +84,16 @@ export default function Billing({ customerId, isWorker = false, workerId, isCust
   const debouncedSearch = useDebouncedValue(search, 400);
   const [viewingDetails, setViewingDetails] = useState<string | null>(customerId || null);
 
-  // Helper to compute display dates for the active cycle
+  // ─── Rate Editor State (vendor-only) ─────────────────────────────────────
+  const [showRateEditor, setShowRateEditor] = useState(false);
+  const [newRate, setNewRate] = useState('');
+  const [applyMode, setApplyMode] = useState<'all' | 'from_date'>('all');
+  const [applyFromDate, setApplyFromDate] = useState('');
+  const [showRateConfirm, setShowRateConfirm] = useState(false);
+  const [isUpdatingRate, setIsUpdatingRate] = useState(false);
+  const [rateUpdateMsg, setRateUpdateMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+
+
   const getCycleDates = (monthStr: string, cycle: BillingCycle, customStart?: string, customEnd?: string) => {
     if (cycle === 'custom' && customStart && customEnd) {
       return { 
@@ -92,34 +108,34 @@ export default function Billing({ customerId, isWorker = false, workerId, isCust
     const m = parseInt(mStr || String(new Date().getMonth() + 1), 10);
     const lastDay = new Date(year, m, 0).getDate();
     const pad = (n: number) => String(n).padStart(2, '0');
-    const monthName = new Date(year, m - 1, 1).toLocaleDateString('default', { month: 'short', year: 'numeric' });
+    const monthName = new Date(year, m - 1, 1).toLocaleDateString(lang === 'ta' ? 'ta-IN' : 'en-IN', { month: 'short', year: 'numeric' });
 
     if (cycle === '1-10') {
       return {
         startDate: `${year}-${pad(m)}-01`,
         endDate: `${year}-${pad(m)}-10`,
-        label: `1 – 10 ${monthName} (Cycle 1)`,
+        label: `1 – 10 ${monthName} (${t('cycleLabel')} 1)`,
         shortLabel: '1st - 10th',
       };
     } else if (cycle === '11-20') {
       return {
         startDate: `${year}-${pad(m)}-11`,
         endDate: `${year}-${pad(m)}-20`,
-        label: `11 – 20 ${monthName} (Cycle 2)`,
+        label: `11 – 20 ${monthName} (${t('cycleLabel')} 2)`,
         shortLabel: '11th - 20th',
       };
     } else if (cycle === '21-end') {
       return {
         startDate: `${year}-${pad(m)}-21`,
         endDate: `${year}-${pad(m)}-${pad(lastDay)}`,
-        label: `21 – ${lastDay} ${monthName} (Cycle 3)`,
+        label: `21 – ${lastDay} ${monthName} (${t('cycleLabel')} 3)`,
         shortLabel: '21st - End',
       };
     } else {
       return {
         startDate: `${year}-${pad(m)}-01`,
         endDate: `${year}-${pad(m)}-${pad(lastDay)}`,
-        label: `${monthName} (Full Month)`,
+        label: `${monthName} (${t('entireMonth')})`,
         shortLabel: 'Full Month',
       };
     }
@@ -146,6 +162,7 @@ export default function Billing({ customerId, isWorker = false, workerId, isCust
   }, [selectedMonth, selectedCycle, customStartDate, customEndDate, viewingDetails]);
 
   const fetchBilling = () => {
+    setIsLoadingBilling(true);
     let url = `/api/billing/${selectedMonth}?cycle=${selectedCycle}`;
     if (selectedCycle === 'custom' && customStartDate && customEndDate) {
       url += `&startDate=${customStartDate}&endDate=${customEndDate}`;
@@ -153,7 +170,8 @@ export default function Billing({ customerId, isWorker = false, workerId, isCust
     fetch(url, { headers: getAuthHeaders() })
       .then(res => res.json())
       .then(data => setBillingData(Array.isArray(data) ? data : []))
-      .catch(() => setBillingData([]));
+      .catch(() => setBillingData([]))
+      .finally(() => setIsLoadingBilling(false));
   };
 
   const fetchDetailedBilling = (id: string) => {
@@ -178,6 +196,60 @@ export default function Billing({ customerId, isWorker = false, workerId, isCust
         setDetailError(String(error.message || error));
         setDetailedData(null);
       });
+  };
+
+  // ─── Bulk Rate Update (vendor-only) ──────────────────────────────────────
+  const handleBulkRateUpdate = async () => {
+    if (!viewingDetails || !newRate) return;
+    const rateVal = parseFloat(newRate);
+    if (isNaN(rateVal) || rateVal <= 0) {
+      setRateUpdateMsg({ type: 'error', text: t('validPositiveRate') });
+      return;
+    }
+    if (applyMode === 'from_date' && !applyFromDate) {
+      setRateUpdateMsg({ type: 'error', text: t('selectDateToApply') });
+      return;
+    }
+    setShowRateConfirm(false);
+    setIsUpdatingRate(true);
+    setRateUpdateMsg(null);
+    try {
+      const body: any = {
+        customer_id: viewingDetails,
+        new_rate: rateVal,
+        apply_mode: applyMode,
+      };
+      if (applyMode === 'from_date' && applyFromDate) {
+        body.from_date = applyFromDate;
+      }
+      const res = await fetch('/api/entries/bulk-update-rate', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+        body: JSON.stringify(body),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setRateUpdateMsg({ type: 'error', text: t('failedUpdateRate') });
+        return;
+      }
+      setRateUpdateMsg({
+        type: 'success',
+        text: `✅ ${t('rateUpdateSuccess')
+          .replace('{rate}', String(rateVal))
+          .replace('{count}', String(data.updatedCount))
+          .replace('{entryLabel}', t(data.updatedCount === 1 ? 'entrySingular' : 'entriesPlural'))}`,
+      });
+      setShowRateEditor(false);
+      setNewRate('');
+      setApplyMode('all');
+      setApplyFromDate('');
+      // Refresh billing data to reflect new amounts
+      if (viewingDetails) fetchDetailedBilling(viewingDetails);
+    } catch {
+      setRateUpdateMsg({ type: 'error', text: t('networkTryAgain') });
+    } finally {
+      setIsUpdatingRate(false);
+    }
   };
 
   const handleExportExcel = () => {
@@ -215,8 +287,8 @@ export default function Billing({ customerId, isWorker = false, workerId, isCust
   const getPaymentModeLabel = (mode?: string) => {
     switch (mode) {
       case 'upi': return 'UPI';
-      case 'bank_transfer': return 'Bank Transfer';
-      default: return 'Cash';
+      case 'bank_transfer': return t('bankTransfer');
+      default: return t('cash');
     }
   };
 
@@ -337,8 +409,13 @@ export default function Billing({ customerId, isWorker = false, workerId, isCust
     if (!detailedData) {
       return (
         <div className="space-y-4 md:space-y-10 pb-4 md:pb-20">
-          <div className="bg-white rounded-2xl border border-slate-100 p-8 text-center shadow-soft">
-            <p className="text-lg font-display font-bold text-slate-900">{t('loading')}</p>
+          <div className="bg-white rounded-2xl border border-slate-100 p-6 shadow-soft animate-pulse">
+            <div className="h-6 w-48 rounded bg-slate-200" />
+            <div className="mt-6 grid gap-3 md:grid-cols-3">
+              {Array.from({ length: 3 }).map((_, index) => (
+                <div key={index} className="h-20 rounded-xl bg-slate-100" />
+              ))}
+            </div>
           </div>
         </div>
       );
@@ -352,9 +429,13 @@ export default function Billing({ customerId, isWorker = false, workerId, isCust
       .filter((a: any) => a.type === 'deduction')
       .reduce((acc, curr: any) => acc + curr.amount, 0);
     const totalFeedAmount = (detailedData.feedPurchases || []).reduce((acc, curr) => acc + curr.amount, 0);
+    const visibleFeedReductions = (detailedData.feedReductions || []).filter(
+      (record) => Number(record.quantity || 0) > 0 || Number(record.amount || 0) > 0
+    );
     
     // Cattle Feed Reduction logic
-    const cattleFeedReduction = detailedData.customer?.cattle_feed_reduction || 0;
+    const cattleFeedReduction = (detailedData.feedReductions || []).reduce((sum, record) => sum + Number(record.amount || 0), 0);
+    const cattleFeedReductionQuantity = (detailedData.feedReductions || []).reduce((sum, record) => sum + Number(record.quantity || 0), 0);
     const netCattleFeed = Math.max(0, totalFeedAmount - cattleFeedReduction);
     const remainingBalance = netCattleFeed;
     
@@ -417,7 +498,7 @@ export default function Billing({ customerId, isWorker = false, workerId, isCust
                 })}
                 className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-lg md:rounded-xl transition-all flex items-center gap-1.5 shadow-sm touch-btn"
               >
-                <QrCode size={14} /> Pay via UPI
+                <QrCode size={14} /> {t('payViaUpi')}
               </button>
             )}
           </div>
@@ -444,7 +525,7 @@ export default function Billing({ customerId, isWorker = false, workerId, isCust
                 <div className="w-8 h-8 md:w-10 md:h-10 bg-emerald-600 text-white rounded-lg md:rounded-xl flex items-center justify-center shadow-lg shadow-emerald-100 shrink-0">
                   <Droplets size={20} />
                 </div>
-                <span className="text-[9px] md:text-[10px] font-black uppercase tracking-widest leading-tight text-emerald-700">Total Liters Collected</span>
+                <span className="text-[9px] md:text-[10px] font-black uppercase tracking-widest leading-tight text-emerald-700">{t('totalLitersCollected')}</span>
               </div>
               <p className="text-lg md:text-3xl font-display font-bold text-emerald-900 tracking-tight">
                 {detailedData.milkEntries.reduce((acc, curr) => acc + curr.liters, 0).toFixed(1)} L
@@ -462,16 +543,16 @@ export default function Billing({ customerId, isWorker = false, workerId, isCust
                     <IndianRupee size={18} className="text-white" />
                   </div>
                   <div>
-                    <p className="text-sm font-black text-emerald-800">Money Received — ₹{totalReceived.toFixed(0)}</p>
+                    <p className="text-sm font-black text-emerald-800">{t('moneyReceived')} — ₹{totalReceived.toFixed(0)}</p>
                     <p className="text-[11px] text-emerald-600 font-medium mt-0.5">
-                      Your vendor has sent this payment to your account or in cash. This amount is <span className="font-black">not</span> deducted from your advance balance.
+                      {t('moneyReceivedDescription')}
                     </p>
                   </div>
                 </div>
               );
             })()}
 
-            <div className="grid grid-cols-3 md:grid-cols-3 lg:grid-cols-6 gap-2 md:gap-4 md:gap-6">
+            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-2 md:gap-4 md:gap-6">
               <div className="bento-card bg-emerald-50/30 border-emerald-100 flex flex-col justify-between col-span-1">
                 <div className="flex flex-col gap-1 md:gap-3 text-emerald-600 mb-2 md:mb-6">
                   <div className="w-8 h-8 md:w-10 md:h-10 bg-emerald-600 text-white rounded-lg md:rounded-xl flex items-center justify-center shadow-lg shadow-emerald-100 shrink-0">
@@ -533,13 +614,13 @@ export default function Billing({ customerId, isWorker = false, workerId, isCust
                     <Package size={20} className="hidden md:block" />
                   </div>
                   <span className="text-[9px] md:text-[10px] font-black uppercase tracking-widest leading-tight text-rose-700">
-                    {isCustomer ? 'Advance Due' : t('totalDebt')}
+                    {isCustomer ? t('advanceDue') : t('totalDebt')}
                   </span>
                 </div>
                 <div>
                   <p className="text-lg md:text-3xl font-display font-bold text-rose-600 tracking-tight">₹{((detailedData as any).advanceBalance || 0).toFixed(0)}</p>
                   {isCustomer && (
-                    <p className="text-[8px] text-rose-400 mt-1 uppercase font-black tracking-widest hidden md:block">After all deductions</p>
+                    <p className="text-[8px] text-rose-400 mt-1 uppercase font-black tracking-widest hidden md:block">{t('afterAllDeductions')}</p>
                   )}
                 </div>
               </div>
@@ -567,7 +648,7 @@ export default function Billing({ customerId, isWorker = false, workerId, isCust
                 <div>
                   <h3 className="section-heading mb-1">{t('monthlyStatement')}</h3>
                   <p className="text-xs md:text-sm text-slate-500 font-medium">
-                    Billing Period: <span className="font-bold text-slate-800">{currentCycleInfo.label}</span>
+                    {t('billingPeriod')}: <span className="font-bold text-slate-800">{currentCycleInfo.label}</span>
                   </p>
                 </div>
                 <div className="text-left md:text-right">
@@ -579,7 +660,7 @@ export default function Billing({ customerId, isWorker = false, workerId, isCust
               <div className="flex flex-col lg:flex-row items-stretch gap-4 md:gap-10">
                 <div className="flex-1 w-full">
                   <div className="bg-slate-50 rounded-2xl md:rounded-3xl p-4 md:p-8 border border-slate-100">
-                    <table className="w-full text-left">
+                    <table className="hidden sm:table w-full text-left">
                       <thead>
                         <tr className="border-b border-slate-200">
                           <th className="pb-3 text-[10px] font-black text-slate-400 uppercase tracking-widest">{t('category')}</th>
@@ -600,7 +681,7 @@ export default function Billing({ customerId, isWorker = false, workerId, isCust
                           <td className="py-3 text-xs md:text-sm font-bold text-slate-500 text-right">₹{totalFeedAmount.toFixed(2)}</td>
                         </tr>
                         <tr>
-                          <td className="py-3 text-xs md:text-sm font-bold text-slate-700">{t('cattleFeedReduction')}</td>
+                          <td className="py-3 text-xs md:text-sm font-bold text-slate-700">{t('cattleFeedReduction')} ({cattleFeedReductionQuantity} sacks)</td>
                           <td className="py-3 text-xs md:text-sm font-black text-rose-500 text-right">- ₹{cattleFeedReduction.toFixed(2)}</td>
                         </tr>
                         <tr>
@@ -617,6 +698,22 @@ export default function Billing({ customerId, isWorker = false, workerId, isCust
                         </tr>
                       </tbody>
                     </table>
+                    <div className="sm:hidden divide-y divide-slate-200">
+                      {[
+                        { label: t('milkEarnings'), value: `+ ₹${totalMilkAmount.toFixed(2)}`, valueClass: 'font-black text-emerald-600' },
+                        { label: t('advancesDeduction'), value: `− ₹${totalBillDeductions.toFixed(2)}`, valueClass: 'font-black text-rose-500' },
+                        { label: t('totalCattleFeed'), value: `₹${totalFeedAmount.toFixed(2)}`, valueClass: 'font-bold text-slate-600' },
+                        { label: `${t('cattleFeedReduction')} (${cattleFeedReductionQuantity} ${t('sacks')})`, value: `− ₹${cattleFeedReduction.toFixed(2)}`, valueClass: 'font-black text-rose-500' },
+                        { label: t('netCattleFeed'), value: `₹${netCattleFeed.toFixed(2)}`, valueClass: 'font-bold text-emerald-600' },
+                        { label: t('remainingBalance'), value: `₹${remainingBalance.toFixed(2)}`, valueClass: 'font-bold text-orange-600' },
+                        { label: t('finalNetSettlement'), value: `₹${finalPayable.toFixed(2)}`, valueClass: 'text-base font-black text-emerald-700' },
+                      ].map((row, index) => (
+                        <div key={index} className={`flex items-start justify-between gap-4 py-3 ${index === 6 ? 'bg-white/50 px-2' : ''}`}>
+                          <p className={`text-xs ${index === 6 ? 'font-black text-slate-900' : 'font-semibold text-slate-600'}`}>{row.label}</p>
+                          <p className={`shrink-0 text-right text-xs ${row.valueClass}`}>{row.value}</p>
+                        </div>
+                      ))}
+                    </div>
                   </div>
                   
                   <div className="mt-4 md:mt-8 grid grid-cols-2 gap-3 md:gap-4">
@@ -648,10 +745,182 @@ export default function Billing({ customerId, isWorker = false, workerId, isCust
                             <span className="text-xs md:text-sm font-mono font-bold text-emerald-400">{detailedData.customer.upi_id}</span>
                           </div>
                         )}
-                        <div className="flex justify-between">
-                          <span className="text-xs md:text-sm font-bold text-slate-400">{t('baseRate')}</span>
-                          <span className="text-xs md:text-sm font-black text-white">₹{((detailedData as any).customer?.default_rate || 30).toFixed(2)}/L</span>
+
+                        {/* ── Milk Rate Row with Edit Button (vendor-only) ── */}
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-xs md:text-sm font-bold text-slate-400">{t('milkRate')}</span>
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs md:text-sm font-black text-white">
+                              ₹{((detailedData as any).customer?.default_rate || 30).toFixed(0)}/L
+                            </span>
+                            {!isCustomer && !isWorker && (
+                              <button
+                                onClick={() => {
+                                  setNewRate(String((detailedData as any).customer?.default_rate || 30));
+                                  setShowRateEditor(prev => !prev);
+                                  setRateUpdateMsg(null);
+                                }}
+                                className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-emerald-600/20 hover:bg-emerald-600/40 text-emerald-400 text-[11px] font-black uppercase tracking-wider transition-all touch-btn border border-emerald-600/30"
+                                title={t('edit')}
+                              >
+                                <Pencil size={11} /> {t('edit')}
+                              </button>
+                            )}
+                          </div>
                         </div>
+
+                        {/* ── Inline Rate Editor Panel (vendor-only) ── */}
+                        {!isCustomer && !isWorker && showRateEditor && (
+                          <motion.div
+                            initial={{ opacity: 0, y: -8 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            className="mt-1 bg-white/10 rounded-xl p-3.5 space-y-3.5 border border-white/10"
+                          >
+                            <div className="border-b border-white/10 pb-2">
+                              <h5 className="text-[11px] font-black text-emerald-400 uppercase tracking-wider">
+                                {t('applyChangedRate')}
+                              </h5>
+                              <p className="text-[10px] text-slate-300 font-medium mt-0.5">
+                                {t('applyNewRateToEntries')}
+                              </p>
+                            </div>
+
+                            {/* Rate input */}
+                            <div>
+                              <label className="block text-[10px] font-black text-slate-300 uppercase tracking-wider mb-1">{t('newMilkRate')}</label>
+                              <div className="flex items-center gap-1.5">
+                                <span className="text-white font-black text-sm">₹</span>
+                                <input
+                                  type="number"
+                                  min="1"
+                                  step="0.5"
+                                  value={newRate}
+                                  onChange={e => setNewRate(e.target.value)}
+                                  className="flex-1 bg-white/10 border border-white/20 rounded-lg px-2.5 py-2 text-white text-sm font-bold outline-none focus:border-emerald-400 transition-colors"
+                                  placeholder="e.g. 35"
+                                />
+                                <span className="text-slate-300 text-xs font-bold">/L</span>
+                              </div>
+                            </div>
+
+                            {/* Apply Mode: Two Options */}
+                            <div className="space-y-2">
+                              <label className="block text-[10px] font-black text-slate-300 uppercase tracking-wider">
+                                {t('applyNewRateToEntries')}
+                              </label>
+
+                              {/* Option A */}
+                              <div
+                                onClick={() => setApplyMode('all')}
+                                className={`p-2.5 rounded-xl border cursor-pointer transition-all ${
+                                  applyMode === 'all'
+                                    ? 'bg-emerald-900/40 border-emerald-500 text-white shadow-sm'
+                                    : 'bg-white/5 border-white/10 text-slate-300 hover:bg-white/10'
+                                }`}
+                              >
+                                <div className="flex items-center gap-2">
+                                  <div className={`w-3.5 h-3.5 rounded-full border-2 flex items-center justify-center ${
+                                    applyMode === 'all' ? 'border-emerald-400 bg-emerald-400' : 'border-slate-400'
+                                  }`}>
+                                    {applyMode === 'all' && <div className="w-1.5 h-1.5 rounded-full bg-slate-900" />}
+                                  </div>
+                                  <span className="text-xs font-black">{t('applyToAllEntries')}</span>
+                                </div>
+                                <p className="text-[10px] text-slate-400 mt-1 pl-5.5 leading-relaxed">
+                                  {t('optionAllEntriesDescription')}
+                                </p>
+                              </div>
+
+                              {/* Option B */}
+                              <div
+                                onClick={() => setApplyMode('from_date')}
+                                className={`p-2.5 rounded-xl border cursor-pointer transition-all ${
+                                  applyMode === 'from_date'
+                                    ? 'bg-emerald-900/40 border-emerald-500 text-white shadow-sm'
+                                    : 'bg-white/5 border-white/10 text-slate-300 hover:bg-white/10'
+                                }`}
+                              >
+                                <div className="flex items-center gap-2">
+                                  <div className={`w-3.5 h-3.5 rounded-full border-2 flex items-center justify-center ${
+                                    applyMode === 'from_date' ? 'border-emerald-400 bg-emerald-400' : 'border-slate-400'
+                                  }`}>
+                                    {applyMode === 'from_date' && <div className="w-1.5 h-1.5 rounded-full bg-slate-900" />}
+                                  </div>
+                                  <span className="text-xs font-black">{t('applyFromSelectedDate')}</span>
+                                </div>
+                                <p className="text-[10px] text-slate-400 mt-1 pl-5.5 leading-relaxed">
+                                  {t('optionFromDateDescription')}
+                                </p>
+
+                                {/* Date picker for Option B */}
+                                {applyMode === 'from_date' && (
+                                  <div className="mt-2 pl-5.5" onClick={e => e.stopPropagation()}>
+                                    <label className="block text-[10px] font-black text-emerald-300 uppercase tracking-wider mb-1">
+                                      {t('selectDate')}
+                                    </label>
+                                    <input
+                                      type="date"
+                                      value={applyFromDate}
+                                      onChange={e => setApplyFromDate(e.target.value)}
+                                      className="w-full bg-slate-800 border border-emerald-500/50 rounded-lg px-2.5 py-1.5 text-white text-xs font-bold outline-none focus:border-emerald-400 transition-colors"
+                                    />
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+
+                            {/* Action buttons */}
+                            <div className="flex gap-2 pt-1">
+                              <button
+                                type="button"
+                                onClick={() => { setShowRateEditor(false); setRateUpdateMsg(null); }}
+                                className="flex-1 py-2 bg-white/10 hover:bg-white/20 text-slate-300 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all touch-btn flex items-center justify-center gap-1"
+                              >
+                                <XIcon size={11} /> {t('cancel')}
+                              </button>
+                              <button
+                                type="button"
+                                disabled={!newRate || parseFloat(newRate) <= 0 || (applyMode === 'from_date' && !applyFromDate)}
+                                onClick={() => {
+                                  if (!newRate || parseFloat(newRate) <= 0) {
+                                    setRateUpdateMsg({ type: 'error', text: t('enterValidRate') });
+                                    return;
+                                  }
+                                  if (applyMode === 'from_date' && !applyFromDate) {
+                                    setRateUpdateMsg({ type: 'error', text: t('selectDateToApply') });
+                                    return;
+                                  }
+                                  setRateUpdateMsg(null);
+                                  setShowRateConfirm(true);
+                                }}
+                                className="flex-1 py-2 bg-amber-500 hover:bg-amber-600 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-lg text-[10px] font-black uppercase tracking-wider transition-all touch-btn flex items-center justify-center gap-1 shadow-sm"
+                              >
+                                <Pencil size={11} /> {t('applyRate')}
+                              </button>
+                            </div>
+
+                            {/* Inline error for rate editor */}
+                            {rateUpdateMsg && !showRateConfirm && (
+                              <div className={`flex items-start gap-1.5 text-[10px] font-bold rounded-lg px-2.5 py-2 ${
+                                rateUpdateMsg.type === 'success'
+                                  ? 'bg-emerald-600/20 text-emerald-300 border border-emerald-600/30'
+                                  : 'bg-rose-600/20 text-rose-300 border border-rose-600/30'
+                              }`}>
+                                {rateUpdateMsg.type === 'success' ? <CheckCircle size={11} className="mt-0.5 shrink-0" /> : <AlertTriangle size={11} className="mt-0.5 shrink-0" />}
+                                <span>{rateUpdateMsg.text}</span>
+                              </div>
+                            )}
+                          </motion.div>
+                        )}
+
+                        {/* Success banner outside rate editor (after close) */}
+                        {!showRateEditor && rateUpdateMsg?.type === 'success' && (
+                          <div className="flex items-start gap-1.5 text-[10px] font-bold rounded-lg px-2.5 py-2 bg-emerald-600/20 text-emerald-300 border border-emerald-600/30">
+                            <CheckCircle size={11} className="mt-0.5 shrink-0" />
+                            <span>{rateUpdateMsg.text}</span>
+                          </div>
+                        )}
+
                         <div className="flex justify-between">
                           <span className="text-xs md:text-sm font-bold text-slate-400">{t('totalSupply')}</span>
                           <span className="text-xs md:text-sm font-black text-white">{detailedData.milkEntries.reduce((acc, curr) => acc + curr.liters, 0).toFixed(1)} L</span>
@@ -674,7 +943,7 @@ export default function Billing({ customerId, isWorker = false, workerId, isCust
                           })}
                           className="w-full py-2.5 md:py-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-black uppercase tracking-wider transition-all flex items-center justify-center gap-1.5 touch-btn shadow-md"
                         >
-                          <QrCode size={14} /> Pay via UPI / QR
+                          <QrCode size={14} /> {t('payViaUpiQr')}
                         </button>
                       )}
                       <button 
@@ -691,6 +960,62 @@ export default function Billing({ customerId, isWorker = false, workerId, isCust
           </div>
         )}
 
+        {/* ── Confirmation Modal for Bulk Rate Change ── */}
+        {showRateConfirm && (
+          <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0, y: 20 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.9, opacity: 0, y: 20 }}
+              className="bg-white rounded-2xl md:rounded-3xl shadow-2xl p-6 md:p-8 max-w-md w-full border border-slate-100"
+            >
+              <div className="w-14 h-14 bg-amber-50 text-amber-500 rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-inner">
+                <AlertTriangle size={28} />
+              </div>
+              <h3 className="text-lg md:text-xl font-display font-bold text-slate-900 mb-2 text-center tracking-tight">
+                {t('changeMilkRate')}
+              </h3>
+              <p className="text-slate-600 text-sm font-medium mb-4 text-center leading-relaxed">
+                {t('changeMilkRateDescription')}
+              </p>
+              <div className="bg-slate-50 border border-slate-100 rounded-xl p-3 mb-6 space-y-1.5 text-xs text-slate-600">
+                <div className="flex justify-between">
+                  <span className="font-medium text-slate-400">{t('newRate')}:</span>
+                  <span className="font-black text-emerald-600">₹{newRate}/L</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="font-medium text-slate-400">{t('scope')}:</span>
+                  <span className="font-bold text-slate-800">
+                    {applyMode === 'all' ? t('allExistingEntries') : `${t('fromDate')} ${applyFromDate}`}
+                  </span>
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <button
+                  onClick={() => setShowRateConfirm(false)}
+                  className="py-3 rounded-xl border border-slate-200 text-slate-600 font-black text-xs uppercase tracking-wider hover:bg-slate-50 transition-all active:scale-95 touch-btn"
+                >
+                  {t('cancel')}
+                </button>
+                <button
+                  disabled={isUpdatingRate}
+                  onClick={handleBulkRateUpdate}
+                  className="py-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 text-white font-black text-xs uppercase tracking-wider transition-all shadow-lg shadow-emerald-100 active:scale-95 touch-btn flex items-center justify-center gap-1.5"
+                >
+                  {isUpdatingRate ? (
+                    <><span className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" /> {t('updating')}</>
+                  ) : (
+                    <>{t('applyNewRate')}</>
+                  )}
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+
+
+
+
         {/* Detailed Records */}
         <div className="grid grid-cols-1 gap-4 md:gap-10">
           {/* Milk Records */}
@@ -700,9 +1025,9 @@ export default function Billing({ customerId, isWorker = false, workerId, isCust
                 <Droplets size={13} className="text-emerald-500" />
                 {t('milkSupplyDetails')}
               </h4>
-              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">{detailedData.milkEntries.length} Records</span>
+              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">{detailedData.milkEntries.length} {t('recordsLabel')}</span>
             </div>
-            <div className="overflow-x-auto">
+            <div className="hidden sm:block overflow-x-auto">
               <table className="w-full text-left mobile-compact-table">
                 <thead className="bg-white/90 backdrop-blur sticky top-0 z-10">
                   <tr className="border-b border-slate-50">
@@ -755,6 +1080,49 @@ export default function Billing({ customerId, isWorker = false, workerId, isCust
                 </tbody>
               </table>
             </div>
+            <div className="sm:hidden divide-y divide-slate-100 px-3">
+              {detailedData.milkEntries.map((entry, index) => (
+                <div key={index} className="py-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <p className="text-xs font-bold text-slate-800">
+                      {new Date(entry.date + 'T00:00:00').toLocaleDateString(lang === 'ta' ? 'ta-IN' : 'en-IN', { day: 'numeric', month: 'short' })}
+                    </p>
+                    <span className={`rounded-full px-2 py-0.5 text-[10px] font-black ${entry.shift === 'AM' ? 'bg-amber-50 text-amber-700' : 'bg-indigo-50 text-indigo-700'}`}>
+                      {entry.shift}
+                    </span>
+                  </div>
+                  <div className={`mt-2 grid ${isWorker ? 'grid-cols-1' : 'grid-cols-3'} gap-2`}>
+                    <div>
+                      <p className="text-[10px] font-semibold text-slate-400">{t('liters')}</p>
+                      <p className="text-xs font-bold text-slate-700">{Number(entry.liters).toFixed(1)} L</p>
+                    </div>
+                    {!isWorker && (
+                      <>
+                        <div>
+                          <p className="text-[10px] font-semibold text-slate-400">{t('rate')}</p>
+                          <p className="text-xs font-bold text-slate-700">₹{entry.rate || ((detailedData as any).customer?.default_rate || 30)}/L</p>
+                        </div>
+                        <div>
+                          <p className="text-[10px] font-semibold text-slate-400">{t('amount')}</p>
+                          <p className="text-xs font-black text-emerald-700">₹{Number(entry.amount).toFixed(2)}</p>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                </div>
+              ))}
+              {detailedData.milkEntries.length === 0 ? (
+                <p className="py-5 text-center text-xs italic text-slate-400">{t('noEntriesForMonth')}</p>
+              ) : (
+                <div className="flex items-center justify-between gap-3 py-3">
+                  <span className="text-xs font-black uppercase text-slate-700">{t('subtotal')}</span>
+                  <span className="text-xs font-black text-slate-900">
+                    {detailedData.milkEntries.reduce((total, entry) => total + Number(entry.liters), 0).toFixed(1)} L
+                    {!isWorker && ` · ₹${totalMilkAmount.toFixed(2)}`}
+                  </span>
+                </div>
+              )}
+            </div>
           </div>
 
           {!isWorker && (
@@ -768,7 +1136,7 @@ export default function Billing({ customerId, isWorker = false, workerId, isCust
                   </h4>
                   <span className="text-xs md:text-sm font-black text-rose-500">₹{totalFeedAmount.toFixed(0)}</span>
                 </div>
-                <div className="overflow-x-auto">
+                <div className="hidden sm:block overflow-x-auto">
                   <table className="w-full text-left mobile-compact-table">
                     <thead className="bg-white border-b border-slate-50">
                       <tr>
@@ -785,15 +1153,58 @@ export default function Billing({ customerId, isWorker = false, workerId, isCust
                             {new Date(p.date + 'T00:00:00').toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}
                           </td>
                           <td className="px-4 md:px-8 py-2.5 md:py-4 text-xs md:text-sm font-bold text-slate-700">{p.feed_name}</td>
-                          <td className="hidden sm:table-cell px-4 md:px-8 py-2.5 md:py-4 text-[10px] md:text-xs font-black text-slate-400">{p.quantity} kg</td>
+                          <td className="hidden sm:table-cell px-4 md:px-8 py-2.5 md:py-4 text-[10px] md:text-xs font-black text-slate-400">{p.quantity} sacks × ₹{Number(p.unit_price ?? (p.amount / p.quantity)).toLocaleString('en-IN')}</td>
                           <td className="px-4 md:px-8 py-2.5 md:py-4 text-right text-xs md:text-sm font-display font-black text-rose-500">₹{p.amount.toFixed(0)}</td>
                         </tr>
                       ))}
-                      {detailedData.feedPurchases.length === 0 && (
+                      {visibleFeedReductions.map((reduction, idx) => (
+                        <tr key={`reduction-${idx}`} className="bg-emerald-50/60">
+                          <td className="px-4 md:px-8 py-2.5 md:py-4 text-[10px] md:text-xs font-bold text-slate-500">{reduction.month}</td>
+                          <td className="px-4 md:px-8 py-2.5 md:py-4 text-xs md:text-sm font-bold text-emerald-800">{t('cattleFeedReduction')}</td>
+                          <td className="hidden sm:table-cell px-4 md:px-8 py-2.5 md:py-4 text-[10px] md:text-xs font-black text-emerald-700">{reduction.quantity} sacks × ₹{Number(reduction.unit_price).toLocaleString('en-IN')}</td>
+                          <td className="px-4 md:px-8 py-2.5 md:py-4 text-right text-xs md:text-sm font-display font-black text-emerald-700">− ₹{Number(reduction.amount).toLocaleString('en-IN')}</td>
+                        </tr>
+                      ))}
+                      {detailedData.feedPurchases.length === 0 && visibleFeedReductions.length === 0 && (
                         <tr><td colSpan={4} className="py-6 text-center text-slate-300 italic font-medium text-sm">{t('noFeedAllocations')}</td></tr>
                       )}
                     </tbody>
                   </table>
+                </div>
+                <div className="sm:hidden divide-y divide-slate-100 px-3">
+                  {detailedData.feedPurchases.map((purchase, index) => (
+                    <div key={`purchase-${index}`} className="py-3">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <p className="truncate text-xs font-bold text-slate-800">{purchase.feed_name}</p>
+                          <p className="mt-0.5 text-[10px] text-slate-500">
+                            {new Date(purchase.date + 'T00:00:00').toLocaleDateString(lang === 'ta' ? 'ta-IN' : 'en-IN', { day: 'numeric', month: 'short' })}
+                          </p>
+                        </div>
+                        <p className="shrink-0 text-sm font-black text-rose-600">₹{Number(purchase.amount).toFixed(2)}</p>
+                      </div>
+                      <p className="mt-2 text-[11px] font-semibold text-slate-500">
+                        {purchase.quantity} {t('sacks')} × ₹{Number(purchase.unit_price ?? (purchase.amount / purchase.quantity)).toLocaleString('en-IN')}
+                      </p>
+                    </div>
+                  ))}
+                  {visibleFeedReductions.map((reduction, index) => (
+                    <div key={`reduction-${index}`} className="py-3">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <p className="text-xs font-bold text-emerald-800">{t('cattleFeedReduction')}</p>
+                          <p className="mt-0.5 text-[10px] text-slate-500">{reduction.month}</p>
+                        </div>
+                        <p className="shrink-0 text-sm font-black text-emerald-700">− ₹{Number(reduction.amount).toFixed(2)}</p>
+                      </div>
+                      <p className="mt-2 text-[11px] font-semibold text-emerald-700">
+                        {reduction.quantity} {t('sacks')} × ₹{Number(reduction.unit_price).toLocaleString('en-IN')}
+                      </p>
+                    </div>
+                  ))}
+                  {detailedData.feedPurchases.length === 0 && visibleFeedReductions.length === 0 && (
+                    <p className="py-5 text-center text-xs italic text-slate-400">{t('noFeedAllocations')}</p>
+                  )}
                 </div>
               </div>
 
@@ -806,7 +1217,7 @@ export default function Billing({ customerId, isWorker = false, workerId, isCust
                   </h4>
                   <span className="text-xs md:text-sm font-black text-emerald-600">{t('repaid')}: ₹{totalBillDeductions.toFixed(0)}</span>
                 </div>
-                <div className="overflow-x-auto">
+                <div className="hidden sm:block overflow-x-auto">
                   <table className="w-full text-left mobile-compact-table">
                     <thead className="bg-white border-b border-slate-50">
                       <tr>
@@ -838,6 +1249,25 @@ export default function Billing({ customerId, isWorker = false, workerId, isCust
                     </tbody>
                   </table>
                 </div>
+                <div className="sm:hidden divide-y divide-slate-100 px-3">
+                  {detailedData.advances.length === 0 ? (
+                    <p className="py-5 text-center text-xs italic text-slate-400">{t('noTransactionsRecorded')}</p>
+                  ) : detailedData.advances.map((advance: any, index) => (
+                    <div key={index} className="flex items-center justify-between gap-3 py-3">
+                      <div className="min-w-0">
+                        <p className="text-xs font-bold text-slate-800">
+                          {advance.type === 'deduction' ? t('deductionsLabel') : t('advancesLabel')}
+                        </p>
+                        <p className="mt-0.5 text-[10px] text-slate-500">
+                          {new Date(advance.date + 'T00:00:00').toLocaleDateString(lang === 'ta' ? 'ta-IN' : 'en-IN', { day: 'numeric', month: 'short' })}
+                        </p>
+                      </div>
+                      <p className={`shrink-0 text-sm font-black ${advance.type === 'deduction' ? 'text-emerald-600' : 'text-blue-600'}`}>
+                        ₹{Number(advance.amount).toFixed(2)}
+                      </p>
+                    </div>
+                  ))}
+                </div>
               </div>
 
               {/* Customer Payout Credits Received */}
@@ -851,7 +1281,7 @@ export default function Billing({ customerId, isWorker = false, workerId, isCust
                     {t('paymentsReceived')}: ₹{((detailedData.payments || []).reduce((acc: number, curr: any) => acc + curr.amount, 0)).toFixed(0)}
                   </span>
                 </div>
-                <div className="overflow-x-auto">
+                <div className="hidden sm:block overflow-x-auto">
                   <table className="w-full text-left mobile-compact-table">
                     <thead className="bg-white border-b border-slate-50">
                       <tr>
@@ -889,6 +1319,34 @@ export default function Billing({ customerId, isWorker = false, workerId, isCust
                       )}
                     </tbody>
                   </table>
+                </div>
+                <div className="sm:hidden divide-y divide-slate-100 px-3">
+                  {(detailedData.payments || []).length === 0 ? (
+                    <p className="py-5 text-center text-xs italic text-slate-400">{t('noCreditsYet')}</p>
+                  ) : (detailedData.payments || []).map((payment: any, index: number) => (
+                    <div key={index} className="py-3">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <p className="text-xs font-bold text-slate-800">
+                            {new Date(payment.date + 'T00:00:00').toLocaleDateString(lang === 'ta' ? 'ta-IN' : 'en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}
+                          </p>
+                          {payment.note && <p className="mt-0.5 truncate text-[10px] text-slate-500">{payment.note}</p>}
+                        </div>
+                        <p className="shrink-0 text-sm font-black text-emerald-700">+ ₹{Number(payment.amount).toFixed(2)}</p>
+                      </div>
+                      <div className="mt-2 flex flex-wrap items-center gap-2">
+                        <span className="inline-flex items-center gap-1 rounded-full border border-emerald-100 bg-emerald-50 px-2 py-0.5 text-[9px] font-black uppercase text-emerald-700">
+                          {getPaymentModeIcon(payment.payment_mode)}
+                          {getPaymentModeLabel(payment.payment_mode)}
+                        </span>
+                        {payment.reference_no && (
+                          <span className="text-[10px] font-mono text-slate-500">
+                            {t('referenceNo')}: {payment.reference_no}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  ))}
                 </div>
               </div>
             </div>
@@ -1002,6 +1460,15 @@ export default function Billing({ customerId, isWorker = false, workerId, isCust
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-50">
+              {isLoadingBilling && Array.from({ length: 5 }).map((_, index) => (
+                <tr key={`billing-skeleton-${index}`} className="animate-pulse">
+                  {Array.from({ length: isWorker ? 3 : 7 }).map((__, cellIndex) => (
+                    <td key={cellIndex} className="px-4 py-5">
+                      <div className="h-4 rounded bg-slate-100" />
+                    </td>
+                  ))}
+                </tr>
+              ))}
               {filteredBilling.map((record: any) => (
                 <tr key={record.customer_id} className="group hover:bg-emerald-50/20 transition-all">
                   <td className="px-6 md:px-8 py-4 md:py-5">
@@ -1068,7 +1535,7 @@ export default function Billing({ customerId, isWorker = false, workerId, isCust
                   </td>
                 </tr>
               ))}
-              {filteredBilling.length === 0 && (
+              {!isLoadingBilling && filteredBilling.length === 0 && (
                 <tr>
                   <td colSpan={isWorker ? 3 : 7} className="py-20 text-center">
                     <div className="w-16 h-16 bg-slate-50 rounded-[2rem] flex items-center justify-center text-slate-200 mx-auto mb-4">
@@ -1086,7 +1553,10 @@ export default function Billing({ customerId, isWorker = false, workerId, isCust
 
       {/* Mobile card list for billing */}
       <div className="md:hidden space-y-3">
-        {filteredBilling.length === 0 && (
+        {isLoadingBilling && Array.from({ length: 4 }).map((_, index) => (
+          <div key={`mobile-billing-skeleton-${index}`} className="h-24 rounded-2xl bg-white border border-slate-100 animate-pulse" />
+        ))}
+        {!isLoadingBilling && filteredBilling.length === 0 && (
           <div className="bg-white rounded-2xl border border-slate-100 p-8 text-center">
             <div className="w-12 h-12 bg-slate-50 rounded-xl flex items-center justify-center text-slate-200 mx-auto mb-3">
               <Search size={24} />

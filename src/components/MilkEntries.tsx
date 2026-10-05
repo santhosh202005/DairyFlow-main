@@ -3,6 +3,7 @@ import { Plus, Trash2, Calendar, User, Droplets, Search, Filter, ArrowUpDown } f
 import { motion, AnimatePresence } from 'motion/react';
 import { MilkEntry, Customer } from '../types';
 import { useTranslation } from '../i18n';
+import { triggerMissingEntriesRefresh } from './MissingEntriesAlert';
 
 interface MilkEntriesProps {
   customerId?: string;
@@ -13,9 +14,20 @@ interface MilkEntriesProps {
   isVendor?: boolean;
   isWorker?: boolean;
   defaultRate?: number;
+  initialShift?: 'AM' | 'PM';
+  initialCustomerId?: string;
+  autoOpenModal?: boolean;
+  onAutoOpenHandled?: () => void;
 }
 
-const getCurrentMonthKey = () => new Date().toISOString().substring(0, 7);
+const getLocalDateKey = (date = new Date()) => {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
+const getCurrentMonthKey = () => getLocalDateKey().substring(0, 7);
 
 const monthNames = ['January','February','March','April','May','June','July','August','September','October','November','December'] as const;
 
@@ -63,7 +75,20 @@ const savePendingEntries = (pendingEntries: PendingMilkEntry[]) => {
   localStorage.setItem(key, JSON.stringify(pendingEntries));
 };
 
-export default function MilkEntries({ customerId, vendorId, workerId, workerName, isAdmin = true, isVendor = false, isWorker = false, defaultRate }: MilkEntriesProps) {
+export default function MilkEntries({
+  customerId,
+  vendorId,
+  workerId,
+  workerName,
+  isAdmin = true,
+  isVendor = false,
+  isWorker = false,
+  defaultRate,
+  initialShift,
+  initialCustomerId,
+  autoOpenModal,
+  onAutoOpenHandled,
+}: MilkEntriesProps) {
   const { t } = useTranslation();
 
   const [entries, setEntries] = useState<DisplayMilkEntry[]>([]);
@@ -72,7 +97,8 @@ export default function MilkEntries({ customerId, vendorId, workerId, workerName
   const [pendingCount, setPendingCount] = useState(0);
 
   const [isLoadingEntries, setIsLoadingEntries] = useState(false);
-  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isModalOpen, setIsModalOpen] = useState(Boolean(autoOpenModal));
 
   const current = useMemo(() => new Date(), []);
   const [selectedMonthIndex, setSelectedMonthIndex] = useState(() => current.getMonth());
@@ -93,13 +119,26 @@ export default function MilkEntries({ customerId, vendorId, workerId, workerName
   const [pageSize, setPageSize] = useState(20);
 
   const [formData, setFormData] = useState({
-    customer_id: customerId ? customerId.toString() : '',
-    date: new Date().toISOString().split('T')[0],
-    shift: 'AM' as 'AM' | 'PM',
+    customer_id: initialCustomerId || (customerId ? customerId.toString() : ''),
+    date: getLocalDateKey(),
+    shift: (initialShift || 'AM') as 'AM' | 'PM',
     liters: '',
     rate: defaultRate?.toString() || '',
     worker_id: ''
   });
+
+  useEffect(() => {
+    if (autoOpenModal) {
+      setIsModalOpen(true);
+      setFormData(prev => ({
+        ...prev,
+        shift: initialShift || prev.shift,
+        customer_id: initialCustomerId || prev.customer_id,
+        date: getLocalDateKey(),
+      }));
+      onAutoOpenHandled?.();
+    }
+  }, [autoOpenModal, initialShift, initialCustomerId, onAutoOpenHandled]);
 
   useEffect(() => {
     if (customerId) {
@@ -161,6 +200,7 @@ export default function MilkEntries({ customerId, vendorId, workerId, workerName
     }
 
     const remainingEntries: PendingMilkEntry[] = [];
+    let didSyncEntries = false;
     for (const pendingEntry of pendingEntries) {
       try {
         const response = await fetch('/api/entries', {
@@ -175,6 +215,8 @@ export default function MilkEntries({ customerId, vendorId, workerId, workerName
         const duplicateEntry = response.status === 400 && String(data?.message || '').toLowerCase().includes('already exists');
         if (!response.ok && !duplicateEntry) {
           remainingEntries.push(pendingEntry);
+        } else {
+          didSyncEntries = true;
         }
       } catch {
         remainingEntries.push(pendingEntry);
@@ -184,6 +226,7 @@ export default function MilkEntries({ customerId, vendorId, workerId, workerName
     savePendingEntries(remainingEntries);
     setPendingCount(remainingEntries.length);
     fetchEntries();
+    if (didSyncEntries) triggerMissingEntriesRefresh();
   };
 
   useEffect(() => {
@@ -255,6 +298,7 @@ export default function MilkEntries({ customerId, vendorId, workerId, workerName
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
+    setIsSubmitting(true);
     const customer = customers.find(c => c.id.toString() === formData.customer_id);
     const customerName = customer ? customer.name : '';
 
@@ -284,46 +328,52 @@ export default function MilkEntries({ customerId, vendorId, workerId, workerName
       syncStatus,
     });
 
-    let response: Response;
     try {
-      if (!navigator.onLine) throw new Error('offline');
-      response = await fetch('/api/entries', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...getAuthHeaders()
-        },
-        body: JSON.stringify(payload)
-      });
-      if (response.status >= 500) throw new Error('server unavailable');
-    } catch {
-      const pendingEntry: PendingMilkEntry = {
-        queueId: `offline-${Date.now()}-${Math.random().toString(36).slice(2)}`,
-        payload,
-        displayEntry: createDisplayEntry(`offline-${Date.now()}`, 'pending'),
-      };
-      const pendingEntries = [...loadPendingEntries(), pendingEntry];
-      savePendingEntries(pendingEntries);
-      setPendingCount(pendingEntries.length);
-      setEntries(prev => [pendingEntry.displayEntry, ...prev]);
+      let response: Response;
+      try {
+        if (!navigator.onLine) throw new Error('offline');
+        response = await fetch('/api/entries', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...getAuthHeaders()
+          },
+          body: JSON.stringify(payload)
+        });
+        if (response.status >= 500) throw new Error('server unavailable');
+      } catch {
+        const pendingEntry: PendingMilkEntry = {
+          queueId: `offline-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+          payload,
+          displayEntry: createDisplayEntry(`offline-${Date.now()}`, 'pending'),
+        };
+        const pendingEntries = [...loadPendingEntries(), pendingEntry];
+        savePendingEntries(pendingEntries);
+        setPendingCount(pendingEntries.length);
+        setEntries(prev => [pendingEntry.displayEntry, ...prev]);
+        setIsModalOpen(false);
+        setFormData({ ...formData, customer_id: customerId ? customerId.toString() : '', liters: '', worker_id: '' });
+        return;
+      }
+
+      const data = await response.json().catch(() => null);
+      if (!response.ok) {
+        setError(data?.message || 'Failed to save entry');
+        return;
+      }
+
       setIsModalOpen(false);
+      const newEntry = createDisplayEntry(data?.id || Date.now().toString());
+
+      setEntries(prev => [newEntry, ...prev]);
       setFormData({ ...formData, customer_id: customerId ? customerId.toString() : '', liters: '', worker_id: '' });
-      return;
+      fetchEntries();
+      triggerMissingEntriesRefresh();
+    } finally {
+      setIsSubmitting(false);
     }
-
-    const data = await response.json().catch(() => null);
-    if (!response.ok) {
-      setError(data?.message || 'Failed to save entry');
-      return;
-    }
-
-    setIsModalOpen(false);
-    const newEntry = createDisplayEntry(data?.id || Date.now().toString());
-
-    setEntries(prev => [newEntry, ...prev]);
-    setFormData({ ...formData, customer_id: customerId ? customerId.toString() : '', liters: '', worker_id: '' });
-    fetchEntries();
   };
+
 
   const [showConfirmModal, setShowConfirmModal] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
@@ -338,6 +388,7 @@ export default function MilkEntries({ customerId, vendorId, workerId, workerName
       const response = await fetch(`/api/entries/${id}`, { method: 'DELETE', headers: getAuthHeaders() });
       if (response.ok) {
         fetchEntries();
+        triggerMissingEntriesRefresh();
       } else {
         setEntries(previousEntries);
         const data = await response.json();
@@ -560,7 +611,7 @@ export default function MilkEntries({ customerId, vendorId, workerId, workerName
               setFormData(prev => ({
                 ...prev,
                 customer_id: customerId ? customerId.toString() : prev.customer_id,
-                date: new Date().toISOString().split('T')[0],
+                date: getLocalDateKey(),
               }));
               setIsModalOpen(true);
             }}
@@ -588,7 +639,7 @@ export default function MilkEntries({ customerId, vendorId, workerId, workerName
                 setFormData(prev => ({
                   ...prev,
                   customer_id: customerId ? customerId.toString() : prev.customer_id,
-                  date: new Date().toISOString().split('T')[0],
+                  date: getLocalDateKey(),
                 }));
                 setIsModalOpen(true);
               }}

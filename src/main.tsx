@@ -43,7 +43,20 @@ window.fetch = function (input: RequestInfo | URL, init?: RequestInit) {
     input = url;
   }
 
-  return originalFetch(input, init);
+  const isApiRequest = url.includes('/api/');
+  return originalFetch(input, init)
+    .then((response) => {
+      if (isApiRequest && response.ok) {
+        window.dispatchEvent(new Event('dairyflow:backend-restored'));
+      }
+      return response;
+    })
+    .catch((error) => {
+      if (isApiRequest) {
+        window.dispatchEvent(new Event('dairyflow:backend-unreachable'));
+      }
+      throw error;
+    });
 };
 
 createRoot(document.getElementById('root')!).render(
