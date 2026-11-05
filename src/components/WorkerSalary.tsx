@@ -134,6 +134,7 @@ export default function WorkerSalaryPage({ vendorId }: WorkerSalaryProps) {
             {summaries.map((summary, idx) => {
               const isExpanded = expandedId === summary.worker_id;
               const hasDeduction = summary.salary_deduction > 0;
+              const salaryPaid = Boolean(summary.salary_paid);
               const attendancePct = summary.total_working_days > 0
                 ? Math.round((summary.present_days / summary.total_working_days) * 100) : 0;
               const usingCustomDailyWage = summary.daily_wage > 0;
@@ -156,6 +157,11 @@ export default function WorkerSalaryPage({ vendorId }: WorkerSalaryProps) {
                             <span className="px-2 py-0.5 bg-blue-50 text-blue-700 rounded-lg text-[10px] font-black uppercase">
                               ₹{summary.monthly_salary.toLocaleString('en-IN')}/{lang === 'ta' ? 'மாதம்' : 'mo'}
                             </span>
+                            {salaryPaid && (
+                              <span className="px-2 py-0.5 bg-emerald-50 text-emerald-700 rounded-lg text-[10px] font-black uppercase flex items-center gap-1">
+                                <CheckCircle2 size={11} /> {t('salaryPaid')}
+                              </span>
+                            )}
                             {usingCustomDailyWage && (
                               <span className="px-2 py-0.5 bg-amber-50 text-amber-700 rounded-lg text-[10px] font-black uppercase">
                                 ₹{summary.daily_wage.toLocaleString('en-IN')}/{lang === 'ta' ? 'நாள்' : 'day'}
@@ -214,13 +220,21 @@ export default function WorkerSalaryPage({ vendorId }: WorkerSalaryProps) {
                         {isExpanded ? t('hideCalculation') : t('viewDetailedCalculation')}
                       </p>
                       <button
+                        disabled={salaryPaid}
                         onClick={(e) => {
                           e.stopPropagation();
-                          setPayModalWorker(summary);
+                          if (!salaryPaid) setPayModalWorker(summary);
                         }}
-                        className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition-all shadow-sm flex items-center gap-1.5 touch-btn"
+                        className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all shadow-sm flex items-center gap-1.5 touch-btn ${
+                          salaryPaid
+                            ? 'bg-emerald-50 text-emerald-700 cursor-not-allowed'
+                            : 'bg-emerald-600 hover:bg-emerald-700 text-white'
+                        }`}
                       >
-                        <Send size={13} /> {lang === 'ta' ? 'சம்பளம் அனுப்பு' : 'Pay Salary'}
+                        {salaryPaid ? <CheckCircle2 size={13} /> : <Send size={13} />}
+                        {salaryPaid
+                          ? `${t('salaryPaid')}${summary.salary_paid_date ? ` · ${t('paidOn')} ${new Date(`${summary.salary_paid_date}T00:00:00`).toLocaleDateString(locale)}` : ''}`
+                          : lang === 'ta' ? 'சம்பளம் அனுப்பு' : 'Pay Salary'}
                       </button>
                     </div>
                   </div>
@@ -336,10 +350,10 @@ export default function WorkerSalaryPage({ vendorId }: WorkerSalaryProps) {
           recipientId={String(payModalWorker.worker_id)}
           amount={payModalWorker.final_salary}
           note={`Salary for ${monthName}`}
+          salaryMonth={monthStr}
           onPaymentRecorded={fetchSalary}
         />
       )}
     </div>
   );
 }
-

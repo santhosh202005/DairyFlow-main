@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { User, Info, LogOut, MapPin, Phone, Settings as SettingsIcon, Shield } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+import { User, Info, LogOut, MapPin, Phone, Settings as SettingsIcon, Shield, BookOpen, Megaphone, ShieldCheck, ArrowRight, Loader2 } from 'lucide-react';
 
 import { motion } from 'motion/react';
 import About from './About';
@@ -27,17 +27,26 @@ interface SettingsProps {
     profilePicture?: string;
   };
   onLogout: () => void;
+  onNavigateTo: (view: 'manual' | 'cattle' | 'announcements') => void;
   onProfileUpdate?: (profilePicture: string) => void;
 }
 
 type TabType = 'profile' | 'about' | 'logout';
 
 
-export default function Settings({ authData, onLogout, onProfileUpdate }: SettingsProps) {
+export default function Settings({ authData, onLogout, onNavigateTo, onProfileUpdate }: SettingsProps) {
   const [activeTab, setActiveTab] = useState<TabType>('profile');
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
+  const [isTabLoading, setIsTabLoading] = useState(false);
+  const tabLoadingTimer = useRef<number | null>(null);
   const [language, setLanguage] = useState<string>(() => getStoredLanguage() || 'en');
   const { t, setLang } = useTranslation();
+
+  useEffect(() => () => {
+    if (tabLoadingTimer.current !== null) {
+      window.clearTimeout(tabLoadingTimer.current);
+    }
+  }, []);
 
   const tabs = [
     { id: 'profile' as TabType, label: t('profileInfo'), icon: User },
@@ -47,10 +56,21 @@ export default function Settings({ authData, onLogout, onProfileUpdate }: Settin
     { id: 'logout' as TabType, label: t('signOut'), icon: LogOut, className: 'text-rose-500 hover:bg-rose-50' },
   ];
 
-
+  const settingsLinks = authData.role === 'vendor'
+    ? [
+        { view: 'manual' as const, label: t('manualPageTitle'), icon: BookOpen },
+        { view: 'cattle' as const, label: t('cattleRecords'), icon: ShieldCheck },
+        { view: 'announcements' as const, label: t('announcementsPageTitle'), icon: Megaphone },
+      ]
+    : authData.role === 'customer'
+      ? [
+          { view: 'manual' as const, label: t('manualPageTitle'), icon: BookOpen },
+          { view: 'cattle' as const, label: t('cattleRecords'), icon: ShieldCheck },
+        ]
+      : [];
 
   return (
-    <div className="flex flex-col lg:flex-row gap-8 items-start min-h-[600px]">
+    <div className="relative flex flex-col lg:flex-row gap-8 items-start min-h-[600px]">
       {/* Settings Navigation Sidebar */}
       <aside className="w-full lg:w-80 bg-white border border-slate-100 rounded-3xl p-6 shadow-soft flex flex-col gap-2 shrink-0">
           <div className="px-4 py-3 mb-4 border-b border-slate-50">
@@ -74,13 +94,20 @@ export default function Settings({ authData, onLogout, onProfileUpdate }: Settin
                 key={tab.id}
                 onClick={() => {
                   if (tab.id === 'logout') {
-            setActiveTab('logout');
+                    setActiveTab('logout');
                     setShowLogoutConfirm(true);
                   } else {
+                    if (tabLoadingTimer.current !== null) {
+                      window.clearTimeout(tabLoadingTimer.current);
+                    }
+                    setIsTabLoading(true);
                     setActiveTab(tab.id);
                     setShowLogoutConfirm(false);
+                    tabLoadingTimer.current = window.setTimeout(() => {
+                      setIsTabLoading(false);
+                      tabLoadingTimer.current = null;
+                    }, 850);
                   }
-
                 }}
                 className={`flex items-center gap-3 px-4 py-3.5 rounded-2xl font-bold text-sm transition-all lg:w-full relative group cursor-pointer ${
                   tab.id === 'logout' && !isActive
@@ -108,6 +135,30 @@ export default function Settings({ authData, onLogout, onProfileUpdate }: Settin
 
       {/* Settings Main Content Area */}
       <main className="flex-1 w-full bg-transparent">
+        {settingsLinks.length > 0 && (
+          <section className="mb-6 space-y-3">
+            <div>
+              <h2 className="text-lg font-display font-bold text-slate-900">{t('settingsQuickAccess')}</h2>
+              <p className="mt-1 text-sm text-slate-500">{t('settingsQuickAccessSubtitle')}</p>
+            </div>
+            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+              {settingsLinks.map(({ view, label, icon: Icon }) => (
+                <button
+                  key={view}
+                  type="button"
+                  onClick={() => onNavigateTo(view)}
+                  className="flex min-h-16 w-full items-center gap-3 rounded-2xl border border-slate-200 bg-white p-4 text-left shadow-soft transition hover:border-emerald-200 hover:bg-emerald-50/40 focus:outline-none focus:ring-2 focus:ring-emerald-500/30"
+                >
+                  <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-emerald-50 text-emerald-700">
+                    <Icon size={19} />
+                  </span>
+                  <span className="min-w-0 flex-1 text-sm font-bold text-slate-800">{label}</span>
+                  <ArrowRight size={16} className="shrink-0 text-slate-400" />
+                </button>
+              ))}
+            </div>
+          </section>
+        )}
         <div className="min-h-full">
           {/* Profile Tab */}
           {activeTab === 'profile' && (
@@ -299,7 +350,8 @@ export default function Settings({ authData, onLogout, onProfileUpdate }: Settin
               animate={{ opacity: 1, y: 0 }}
               className="bg-white rounded-3xl border border-slate-100 p-2 md:p-6 shadow-soft"
             >
-              <About 
+              <About
+                isVendor={authData.role === 'vendor'}
                 vendorName={authData.vendorName}
                 vendorPhone={authData.vendorPhone}
                 vendorAddress={authData.vendorAddress}
@@ -348,6 +400,18 @@ export default function Settings({ authData, onLogout, onProfileUpdate }: Settin
           )}
         </div>
       </main>
+      {isTabLoading && (
+        <div
+          role="status"
+          aria-live="polite"
+          className="absolute inset-0 z-30 flex items-center justify-center rounded-3xl bg-white/85 backdrop-blur-sm"
+        >
+          <div className="flex min-w-48 flex-col items-center gap-3 rounded-2xl border border-slate-100 bg-white px-8 py-6 shadow-xl">
+            <Loader2 size={30} className="animate-spin text-emerald-600" />
+            <span className="text-sm font-semibold text-slate-700">{t('loading')}</span>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

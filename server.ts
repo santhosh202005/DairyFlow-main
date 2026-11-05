@@ -6,6 +6,7 @@ import path from "path";
 import { fileURLToPath } from "url";
 import fs from "fs";
 import nodemailer from "nodemailer";
+import { createHash, randomBytes, randomUUID } from "crypto";
 
 
 const __filename = fileURLToPath(import.meta.url);
@@ -235,6 +236,84 @@ async function initDB() {
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
 
+    CREATE TABLE IF NOT EXISTS announcement_sessions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      token_hash TEXT NOT NULL UNIQUE,
+      role TEXT NOT NULL CHECK (role IN ('vendor', 'customer', 'worker')),
+      user_id INTEGER NOT NULL,
+      expires_at INTEGER NOT NULL,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS worker_announcement_recipients (
+      id TEXT PRIMARY KEY,
+      announcement_id TEXT NOT NULL REFERENCES announcements(id) ON DELETE CASCADE,
+      worker_id INTEGER NOT NULL REFERENCES workers(id) ON DELETE CASCADE,
+      sms_status TEXT NOT NULL DEFAULT 'pending'
+        CHECK (sms_status IN ('pending', 'submitted', 'delivered', 'failed', 'unknown')),
+      provider_message_id TEXT,
+      provider_response TEXT,
+      in_app_read_status TEXT NOT NULL DEFAULT 'unread'
+        CHECK (in_app_read_status IN ('unread', 'read')),
+      read_at DATETIME,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(announcement_id, worker_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS announcement_rate_limits (
+      vendor_id INTEGER NOT NULL REFERENCES vendors(id) ON DELETE CASCADE,
+      window_start INTEGER NOT NULL,
+      request_count INTEGER NOT NULL DEFAULT 0,
+      PRIMARY KEY (vendor_id, window_start)
+    );
+
+    CREATE TABLE IF NOT EXISTS announcements (
+      id TEXT PRIMARY KEY,
+      vendor_id INTEGER NOT NULL REFERENCES vendors(id) ON DELETE CASCADE,
+      title TEXT NOT NULL,
+      message TEXT NOT NULL,
+      category TEXT NOT NULL CHECK (category IN (
+        'Milk Delivery Update', 'Delivery Delay', 'Holiday Notice',
+        'Milk Rate Change', 'Monthly Bill Reminder', 'General Announcement'
+      )),
+      idempotency_key TEXT NOT NULL,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(vendor_id, idempotency_key)
+    );
+
+    CREATE TABLE IF NOT EXISTS admin_vendor_messages (
+      id TEXT PRIMARY KEY,
+      title TEXT NOT NULL,
+      message TEXT NOT NULL,
+      idempotency_key TEXT NOT NULL UNIQUE,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS vendor_message_recipients (
+      id TEXT PRIMARY KEY,
+      message_id TEXT NOT NULL REFERENCES admin_vendor_messages(id) ON DELETE CASCADE,
+      vendor_id INTEGER NOT NULL REFERENCES vendors(id) ON DELETE CASCADE,
+      read_status TEXT NOT NULL DEFAULT 'unread' CHECK (read_status IN ('unread', 'read')),
+      read_at DATETIME,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(message_id, vendor_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS announcement_recipients (
+      id TEXT PRIMARY KEY,
+      announcement_id TEXT NOT NULL REFERENCES announcements(id) ON DELETE CASCADE,
+      customer_id INTEGER NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
+      sms_status TEXT NOT NULL DEFAULT 'pending'
+        CHECK (sms_status IN ('pending', 'submitted', 'delivered', 'failed', 'unknown')),
+      provider_message_id TEXT,
+      provider_response TEXT,
+      in_app_read_status TEXT NOT NULL DEFAULT 'unread'
+        CHECK (in_app_read_status IN ('unread', 'read')),
+      read_at DATETIME,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(announcement_id, customer_id)
+    );
+
     -- Speed up customer lookups by phone and sort by name
     CREATE INDEX IF NOT EXISTS idx_customers_phone ON customers(phone);
     CREATE INDEX IF NOT EXISTS idx_customers_name ON customers(name);
@@ -246,6 +325,21 @@ async function initDB() {
     CREATE INDEX IF NOT EXISTS idx_cattle_customer_id ON cattle(customer_id);
     CREATE INDEX IF NOT EXISTS idx_cattle_vaccinations_cattle_id ON cattle_vaccinations(cattle_id);
     CREATE INDEX IF NOT EXISTS idx_cattle_vaccinations_customer_id ON cattle_vaccinations(customer_id);
+    CREATE INDEX IF NOT EXISTS idx_announcement_sessions_expiry ON announcement_sessions(expires_at);
+    CREATE INDEX IF NOT EXISTS idx_announcement_rate_limits_window ON announcement_rate_limits(window_start);
+    CREATE INDEX IF NOT EXISTS idx_announcements_vendor_created ON announcements(vendor_id, created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_announcement_recipients_customer_created
+      ON announcement_recipients(customer_id, created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_announcement_recipients_unread
+      ON announcement_recipients(customer_id, in_app_read_status);
+    CREATE INDEX IF NOT EXISTS idx_worker_announcement_recipients_created
+      ON worker_announcement_recipients(worker_id, created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_worker_announcement_recipients_unread
+      ON worker_announcement_recipients(worker_id, in_app_read_status);
+    CREATE INDEX IF NOT EXISTS idx_vendor_message_recipients_created
+      ON vendor_message_recipients(vendor_id, created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_vendor_message_recipients_unread
+      ON vendor_message_recipients(vendor_id, read_status);
 
     -- Speed up filtering by date
     CREATE INDEX IF NOT EXISTS idx_milk_entries_date ON milk_entries(date);
@@ -253,6 +347,26 @@ async function initDB() {
     CREATE INDEX IF NOT EXISTS idx_feed_purchases_date ON feed_purchases(date);
     CREATE INDEX IF NOT EXISTS idx_cattle_vaccinations_date ON cattle_vaccinations(vaccination_date);
   `);
+
+  const announcementSessionSchema = await db.execute(
+    "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'announcement_sessions'",
+  );
+  if (!String(announcementSessionSchema.rows[0]?.sql || "").includes("'worker'")) {
+    await db.execute("DROP INDEX IF EXISTS idx_announcement_sessions_expiry");
+    await db.execute("ALTER TABLE announcement_sessions RENAME TO announcement_sessions_legacy");
+    await db.execute(`CREATE TABLE announcement_sessions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      token_hash TEXT NOT NULL UNIQUE,
+      role TEXT NOT NULL CHECK (role IN ('vendor', 'customer', 'worker')),
+      user_id INTEGER NOT NULL,
+      expires_at INTEGER NOT NULL,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )`);
+    await db.execute(`INSERT INTO announcement_sessions (id, token_hash, role, user_id, expires_at, created_at)
+      SELECT id, token_hash, role, user_id, expires_at, created_at FROM announcement_sessions_legacy`);
+    await db.execute("DROP TABLE announcement_sessions_legacy");
+    await db.execute("CREATE INDEX idx_announcement_sessions_expiry ON announcement_sessions(expires_at)");
+  }
 
   // Migration helper for optional bank details
   const tryAddCol = async (table: string, col: string, type: string) => {
@@ -321,11 +435,13 @@ async function initDB() {
       amount REAL NOT NULL,
       date DATE NOT NULL,
       note TEXT,
+      salary_month TEXT,
       payment_mode TEXT DEFAULT 'cash',
       reference_no TEXT,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )`);
   } catch (_) {}
+  try { await db.execute('ALTER TABLE worker_credits ADD COLUMN salary_month TEXT'); } catch (_) {}
   try { await db.execute('CREATE INDEX IF NOT EXISTS idx_worker_credits_worker_id ON worker_credits(worker_id)'); } catch (_) {}
 
   // Vendor access requests table
@@ -389,6 +505,207 @@ async function startServer() {
   await initDB();
 
   const app = express();
+  const ANNOUNCEMENT_SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+  const consumeAnnouncementRateLimit = async (vendorId: number) => {
+    const windowStart = Math.floor(Date.now() / (10 * 60 * 1000)) * (10 * 60 * 1000);
+    await db.execute({
+      sql: "INSERT OR IGNORE INTO announcement_rate_limits (vendor_id, window_start, request_count) VALUES (?, ?, 0)",
+      args: [vendorId, windowStart],
+    });
+    const update = await db.execute({
+      sql: `UPDATE announcement_rate_limits
+            SET request_count = request_count + 1
+            WHERE vendor_id = ? AND window_start = ? AND request_count < 10`,
+      args: [vendorId, windowStart],
+    });
+    return Number(update.rowsAffected || 0) > 0;
+  };
+
+  const createAnnouncementSession = async (role: "vendor" | "customer" | "worker", userId: number) => {
+    const token = randomBytes(32).toString("base64url");
+    const tokenHash = createHash("sha256").update(token).digest("hex");
+    const expiresAt = Date.now() + ANNOUNCEMENT_SESSION_TTL_MS;
+    await db.execute({
+      sql: "DELETE FROM announcement_sessions WHERE expires_at <= ?",
+      args: [Date.now()],
+    });
+    await db.execute({
+      sql: "INSERT INTO announcement_sessions (token_hash, role, user_id, expires_at) VALUES (?, ?, ?, ?)",
+      args: [tokenHash, role, userId, expiresAt],
+    });
+    return token;
+  };
+
+  const requireAnnouncementSession = (requiredRole?: "vendor" | "customer" | "worker") =>
+    async (req: any, res: any, next: any) => {
+      const authorization = req.headers.authorization;
+      const match = typeof authorization === "string"
+        ? authorization.match(/^Bearer ([A-Za-z0-9_-]{40,})$/)
+        : null;
+      if (!match) {
+        return res.status(401).json({ success: false, message: "A valid announcement session is required" });
+      }
+
+      try {
+        const tokenHash = createHash("sha256").update(match[1]).digest("hex");
+        const result = await db.execute({
+          sql: "SELECT role, user_id, expires_at FROM announcement_sessions WHERE token_hash = ?",
+          args: [tokenHash],
+        });
+        const session = result.rows[0] as any;
+        if (!session || Number(session.expires_at) <= Date.now()) {
+          if (session) {
+            await db.execute({ sql: "DELETE FROM announcement_sessions WHERE token_hash = ?", args: [tokenHash] });
+          }
+          return res.status(401).json({ success: false, message: "Announcement session expired. Please sign in again." });
+        }
+        if (requiredRole && session.role !== requiredRole) {
+          return res.status(403).json({ success: false, message: "This account is not authorized for this action" });
+        }
+
+        const table = session.role === "vendor" ? "vendors" : session.role === "worker" ? "workers" : "customers";
+        const identity = await db.execute({
+          sql: `SELECT id${session.role === "vendor" || session.role === "customer" ? ", status" : ""} FROM ${table} WHERE id = ?`,
+          args: [session.user_id],
+        });
+        const user = identity.rows[0] as any;
+        if (!user || (session.role !== "worker" && String(user.status || "active").toLowerCase() !== "active")) {
+          await db.execute({ sql: "DELETE FROM announcement_sessions WHERE token_hash = ?", args: [tokenHash] });
+          return res.status(401).json({ success: false, message: "This account is no longer active" });
+        }
+
+        req.announcementSession = { role: session.role, userId: Number(session.user_id), tokenHash };
+        return next();
+      } catch (error) {
+        console.error("[Announcements] Session verification failed:", error);
+        return res.status(503).json({ success: false, message: "Unable to verify session right now" });
+      }
+    };
+
+  const announcementSmsConfiguration = () => {
+    const apiKey = process.env.FAST2SMS_API_KEY;
+    const senderId = process.env.FAST2SMS_ANNOUNCEMENT_SENDER_ID?.trim().toUpperCase();
+    const messageId = process.env.FAST2SMS_ANNOUNCEMENT_TEMPLATE_ID?.trim();
+    const templateText = process.env.FAST2SMS_ANNOUNCEMENT_TEMPLATE_TEXT?.trim();
+    const variableNames = (process.env.FAST2SMS_ANNOUNCEMENT_VARIABLES || "")
+      .split(",").map((name) => name.trim()).filter(Boolean);
+    const allowedVariables = new Set(["vendor_name", "title", "message", "category"]);
+    const templateVariableCount = templateText?.match(/\{#var#\}/gi)?.length || 0;
+    const configured = Boolean(
+      apiKey &&
+      apiKey !== "your_fast2sms_api_key_here" &&
+      senderId && /^[A-Z]{3,6}$/.test(senderId) &&
+      messageId && /^[A-Za-z0-9_-]{4,64}$/.test(messageId) &&
+      templateText &&
+      templateVariableCount > 0 &&
+      variableNames.length === templateVariableCount &&
+      variableNames.includes("message") &&
+      new Set(variableNames).size === variableNames.length &&
+      variableNames.every((name) => allowedVariables.has(name))
+    );
+    return { configured, apiKey, senderId, messageId, variableNames };
+  };
+
+  const sendAnnouncementSms = async (
+    announcementId: string,
+    vendorName: string,
+    announcement: { title: string; message: string; category: string },
+    recipients: Array<{ recipientId: string; phone: string | null }>,
+    recipientTable: "announcement_recipients" | "worker_announcement_recipients" = "announcement_recipients"
+  ) => {
+    const config = announcementSmsConfiguration();
+    if (!config.configured) return;
+
+    const claimResults = await db.batch(recipients.map((recipient) => ({
+      sql: `UPDATE ${recipientTable}
+            SET sms_status = 'unknown', provider_response = 'Submission is in progress; waiting for Fast2SMS response'
+            WHERE id = ? AND announcement_id = ? AND sms_status = 'pending'`,
+      args: [recipient.recipientId, announcementId],
+    })), "write");
+    const claimedRecipients = recipients.filter((_, index) => Number(claimResults[index]?.rowsAffected || 0) > 0);
+    if (claimedRecipients.length === 0) return;
+
+    const phoneDigits = (phone: string | null) => {
+      if (!phone) return null;
+      let digits = phone.replace(/\D/g, "");
+      if (digits.length === 12 && digits.startsWith("91")) digits = digits.slice(2);
+      return /^\d{10}$/.test(digits) ? digits : null;
+    };
+    const validRecipients = claimedRecipients
+      .map((recipient) => ({ ...recipient, number: phoneDigits(recipient.phone) }));
+    const invalidRecipients = validRecipients.filter((recipient) => !recipient.number);
+    if (invalidRecipients.length) {
+      await db.batch(invalidRecipients.map((recipient) => ({
+        sql: `UPDATE ${recipientTable} SET sms_status = 'failed', provider_response = ? WHERE id = ? AND announcement_id = ? AND sms_status = 'unknown'`,
+        args: ["SMS not submitted: recipient phone number is missing or invalid", recipient.recipientId, announcementId],
+      })), "write");
+    }
+    const sendable = validRecipients.filter((recipient) => recipient.number);
+    if (sendable.length === 0) return;
+
+    const values: string[] = [];
+    for (const name of config.variableNames) {
+      const value = ({
+        vendor_name: vendorName,
+        title: announcement.title,
+        message: announcement.message,
+        category: announcement.category,
+      } as Record<string, string>)[name];
+      if (value.includes("|") || /[\r\n]/.test(value)) {
+        const message = `SMS not submitted: ${name} contains characters unsupported by Fast2SMS DLT variable encoding`;
+        await db.batch(sendable.map((recipient) => ({
+          sql: `UPDATE ${recipientTable} SET sms_status = 'failed', provider_response = ? WHERE id = ? AND announcement_id = ? AND sms_status = 'unknown'`,
+          args: [message, recipient.recipientId, announcementId],
+        })), "write");
+        return;
+      }
+      values.push(value);
+    }
+
+    for (let offset = 0; offset < sendable.length; offset += 100) {
+      const batchRecipients = sendable.slice(offset, offset + 100);
+      const query = new URLSearchParams({
+        route: "dlt",
+        sender_id: config.senderId!,
+        message: config.messageId!,
+        variables_values: values.join("|"),
+        numbers: batchRecipients.map((recipient) => recipient.number).join(","),
+      });
+      try {
+        const response = await fetch(`https://www.fast2sms.com/dev/bulkV2?${query.toString()}`, {
+          method: "GET",
+          headers: { authorization: config.apiKey!, Accept: "application/json" },
+          signal: AbortSignal.timeout(15_000),
+        });
+        const raw = await response.text();
+        let providerData: any;
+        try {
+          providerData = JSON.parse(raw);
+        } catch {
+          providerData = { response: raw.slice(0, 2000) };
+        }
+        const accepted = response.ok && providerData?.return === true;
+        const status = accepted ? "submitted" : "failed";
+        const requestId = accepted && (providerData.request_id || providerData.message_id)
+          ? String(providerData.request_id || providerData.message_id)
+          : null;
+        const storedResponse = JSON.stringify({ httpStatus: response.status, response: providerData }).slice(0, 4000);
+        await db.batch(batchRecipients.map((recipient) => ({
+          sql: `UPDATE ${recipientTable} SET sms_status = ?, provider_message_id = ?, provider_response = ? WHERE id = ? AND announcement_id = ? AND sms_status = 'unknown'`,
+          args: [status, requestId, storedResponse, recipient.recipientId, announcementId],
+        })), "write");
+      } catch (error) {
+        const providerResponse = JSON.stringify({
+          error: error instanceof Error ? error.message : "Fast2SMS request outcome is unknown",
+        }).slice(0, 1000);
+        await db.batch(batchRecipients.map((recipient) => ({
+          sql: `UPDATE ${recipientTable} SET sms_status = 'unknown', provider_response = ? WHERE id = ? AND announcement_id = ? AND sms_status = 'unknown'`,
+          args: [providerResponse, recipient.recipientId, announcementId],
+        })), "write");
+      }
+    }
+  };
+
   const defaultPort = 3000;
   const requestedPort = process.env.PORT ? parseInt(process.env.PORT, 10) : defaultPort;
   const PORT = Number.isInteger(requestedPort) ? requestedPort : defaultPort;
@@ -405,7 +722,7 @@ async function startServer() {
     } else {
       res.setHeader("Access-Control-Allow-Origin", "*");
     }
-    res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+    res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS");
     res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
     res.setHeader("Access-Control-Allow-Credentials", "true");
 
@@ -582,6 +899,190 @@ async function startServer() {
     }
     next();
   };
+
+  app.get("/api/admin/vendor-message-recipients", requireAdmin, async (req: any, res) => {
+    const search = typeof req.query.search === "string" ? req.query.search.trim().slice(0, 100) : "";
+    const query = search.replace(/[%_\\]/g, "\\$&");
+    try {
+      const result = await db.execute({
+        sql: `SELECT id, name, phone FROM vendors
+              WHERE (? = '' OR name LIKE ? ESCAPE '\\')
+              ORDER BY name COLLATE NOCASE ASC LIMIT 500`,
+        args: [query, `%${query}%`],
+      });
+      const countResult = await db.execute("SELECT COUNT(*) AS count FROM vendors");
+      return res.json({ success: true, vendors: result.rows, vendorCount: Number(countResult.rows[0]?.count || 0) });
+    } catch (error) {
+      console.error("[AdminVendorMessages] Vendor list failed:", error);
+      return res.status(500).json({ success: false, message: "Unable to load vendors" });
+    }
+  });
+
+  app.get("/api/admin/vendor-messages", requireAdmin, async (_req, res) => {
+    try {
+      const result = await db.execute({
+        sql: `SELECT m.id, m.title, m.message, m.created_at,
+                     COUNT(r.id) AS recipient_count,
+                     SUM(CASE WHEN r.read_status = 'read' THEN 1 ELSE 0 END) AS read_count,
+                     SUM(CASE WHEN r.read_status = 'unread' THEN 1 ELSE 0 END) AS unread_count
+              FROM admin_vendor_messages m
+              LEFT JOIN vendor_message_recipients r ON r.message_id = m.id
+              GROUP BY m.id
+              ORDER BY m.created_at DESC LIMIT 100`,
+      });
+      return res.json({ success: true, messages: result.rows });
+    } catch (error) {
+      console.error("[AdminVendorMessages] History failed:", error);
+      return res.status(500).json({ success: false, message: "Unable to load vendor message history" });
+    }
+  });
+
+  app.post("/api/admin/vendor-messages", requireAdmin, async (req: any, res) => {
+    const { title, message, vendorIds, sendToAll, idempotencyKey } = req.body || {};
+    const cleanTitle = typeof title === "string" ? title.trim() : "";
+    const cleanMessage = typeof message === "string" ? message.trim() : "";
+    const requestKey = typeof idempotencyKey === "string" ? idempotencyKey.trim() : "";
+    if (!cleanTitle || cleanTitle.length > 120) {
+      return res.status(400).json({ success: false, message: "Title is required and must be 120 characters or fewer" });
+    }
+    if (!cleanMessage || cleanMessage.length > 1800) {
+      return res.status(400).json({ success: false, message: "Message is required and must be 1,800 characters or fewer" });
+    }
+    if (!/^[A-Za-z0-9_-]{8,100}$/.test(requestKey)) {
+      return res.status(400).json({ success: false, message: "A valid request id is required" });
+    }
+    if (typeof sendToAll !== "boolean" || (!sendToAll && !Array.isArray(vendorIds))) {
+      return res.status(400).json({ success: false, message: "Choose one or more vendors" });
+    }
+    try {
+      const duplicate = await db.execute({
+        sql: "SELECT id FROM admin_vendor_messages WHERE idempotency_key = ?",
+        args: [requestKey],
+      });
+      if (duplicate.rows[0]) {
+        const count = await db.execute({
+          sql: "SELECT COUNT(*) AS count FROM vendor_message_recipients WHERE message_id = ?",
+          args: [duplicate.rows[0].id],
+        });
+        return res.json({ success: true, duplicate: true, messageId: duplicate.rows[0].id, recipientCount: Number(count.rows[0]?.count || 0) });
+      }
+
+      let recipients: any[];
+      if (sendToAll) {
+        const result = await db.execute("SELECT id FROM vendors ORDER BY id");
+        recipients = result.rows as any[];
+      } else {
+        const requestedIds = [...new Set((vendorIds as unknown[])
+          .map((id) => Number(id))
+          .filter((id) => Number.isSafeInteger(id) && id > 0))];
+        if (requestedIds.length === 0 || requestedIds.length !== vendorIds.length) {
+          return res.status(400).json({ success: false, message: "Select at least one valid vendor" });
+        }
+        if (requestedIds.length > 500) {
+          return res.status(400).json({ success: false, message: "Select up to 500 vendors or use Send to all" });
+        }
+        const placeholders = requestedIds.map(() => "?").join(",");
+        const result = await db.execute({
+          sql: `SELECT id FROM vendors WHERE id IN (${placeholders})`,
+          args: requestedIds,
+        });
+        recipients = result.rows as any[];
+        if (recipients.length !== requestedIds.length) {
+          return res.status(400).json({ success: false, message: "One or more selected vendors no longer exist" });
+        }
+      }
+      if (recipients.length === 0) {
+        return res.status(400).json({ success: false, message: "There are no vendors to receive this message" });
+      }
+
+      const messageId = randomUUID();
+      const createdAt = new Date().toISOString();
+      const statements = [
+        {
+          sql: `INSERT INTO admin_vendor_messages (id, title, message, idempotency_key, created_at)
+                VALUES (?, ?, ?, ?, ?)`,
+          args: [messageId, cleanTitle, cleanMessage, requestKey, createdAt],
+        },
+        ...recipients.map((vendor) => ({
+          sql: `INSERT INTO vendor_message_recipients (id, message_id, vendor_id, read_status, created_at)
+                VALUES (?, ?, ?, 'unread', ?)`,
+          args: [randomUUID(), messageId, Number(vendor.id), createdAt],
+        })),
+      ];
+      await db.batch(statements, "write");
+      return res.status(201).json({ success: true, messageId, recipientCount: recipients.length });
+    } catch (error) {
+      console.error("[AdminVendorMessages] Send failed:", error);
+      return res.status(500).json({ success: false, message: "Unable to send vendor message" });
+    }
+  });
+
+  app.get("/api/vendor/messages/unread-count", requireAnnouncementSession("vendor"), async (req: any, res) => {
+    try {
+      const result = await db.execute({
+        sql: `SELECT COUNT(*) AS count FROM vendor_message_recipients
+              WHERE vendor_id = ? AND read_status = 'unread'`,
+        args: [req.announcementSession.userId],
+      });
+      return res.json({ success: true, count: Number(result.rows[0]?.count || 0) });
+    } catch (error) {
+      console.error("[VendorMessages] Unread count failed:", error);
+      return res.status(500).json({ success: false, message: "Unable to load vendor messages" });
+    }
+  });
+
+  app.get("/api/vendor/messages", requireAnnouncementSession("vendor"), async (req: any, res) => {
+    const unreadOnly = req.query.filter === "unread";
+    try {
+      const result = await db.execute({
+        sql: `SELECT r.id AS recipient_id, m.id AS message_id, m.title, m.message,
+                     r.read_status AS in_app_read_status, r.read_at, r.created_at,
+                     'DairyFlow Admin' AS vendor_name
+              FROM vendor_message_recipients r
+              JOIN admin_vendor_messages m ON m.id = r.message_id
+              WHERE r.vendor_id = ? ${unreadOnly ? "AND r.read_status = 'unread'" : ""}
+              ORDER BY r.created_at DESC LIMIT 100`,
+        args: [req.announcementSession.userId],
+      });
+      return res.json({ success: true, notifications: result.rows });
+    } catch (error) {
+      console.error("[VendorMessages] Notification list failed:", error);
+      return res.status(500).json({ success: false, message: "Unable to load vendor messages" });
+    }
+  });
+
+  app.patch("/api/vendor/messages/:recipientId/read", requireAnnouncementSession("vendor"), async (req: any, res) => {
+    try {
+      const result = await db.execute({
+        sql: `UPDATE vendor_message_recipients
+              SET read_status = 'read', read_at = COALESCE(read_at, CURRENT_TIMESTAMP)
+              WHERE id = ? AND vendor_id = ?`,
+        args: [req.params.recipientId, req.announcementSession.userId],
+      });
+      if (Number(result.rowsAffected || 0) === 0) {
+        return res.status(404).json({ success: false, message: "Vendor message not found" });
+      }
+      return res.json({ success: true });
+    } catch (error) {
+      console.error("[VendorMessages] Mark read failed:", error);
+      return res.status(500).json({ success: false, message: "Unable to update vendor message" });
+    }
+  });
+
+  app.patch("/api/vendor/messages/read-all", requireAnnouncementSession("vendor"), async (req: any, res) => {
+    try {
+      await db.execute({
+        sql: `UPDATE vendor_message_recipients
+              SET read_status = 'read', read_at = CURRENT_TIMESTAMP
+              WHERE vendor_id = ? AND read_status = 'unread'`,
+        args: [req.announcementSession.userId],
+      });
+      return res.json({ success: true });
+    } catch (error) {
+      console.error("[VendorMessages] Mark all read failed:", error);
+      return res.status(500).json({ success: false, message: "Unable to update vendor messages" });
+    }
+  });
 
   // GET /api/admin/vendor-requests — list all vendor requests
   app.get("/api/admin/vendor-requests", requireAdmin, async (_req, res) => {
@@ -795,6 +1296,7 @@ async function startServer() {
         return res.json({
           success: true,
           token: `vendor-token-${vendor.id}`,
+          announcementSessionToken: await createAnnouncementSession("vendor", Number(vendor.id)),
           role: "vendor",
           vendorId: vendor.id,
           vendorName: vendor.name,
@@ -835,6 +1337,7 @@ async function startServer() {
         return res.json({
           success: true,
           token: `vendor-token-${vendor.id}`,
+          announcementSessionToken: await createAnnouncementSession("vendor", Number(vendor.id)),
           role: "vendor",
           vendorId: vendor.id,
           vendorName: vendor.name,
@@ -862,6 +1365,7 @@ async function startServer() {
         return res.json({
           success: true,
           token: `worker-token-${worker.id}`,
+          announcementSessionToken: await createAnnouncementSession("worker", Number(worker.id)),
           role: "worker",
           workerId: worker.id,
           workerName: worker.name,
@@ -895,6 +1399,7 @@ async function startServer() {
         return res.json({
           success: true,
           token: `customer-token-${customer.id}`,
+          announcementSessionToken: await createAnnouncementSession("customer", Number(customer.id)),
           role: "customer",
           customerId: customer.id,
           customerName: customer.name,
@@ -1018,6 +1523,456 @@ async function startServer() {
       }
     }
     res.status(401).json({ success: false, message: "Invalid token" });
+  });
+
+  app.get("/api/announcements/session", requireAnnouncementSession(), (req: any, res) => {
+    return res.json({ success: true, role: req.announcementSession.role });
+  });
+
+  app.delete("/api/announcements/session", requireAnnouncementSession(), async (req: any, res) => {
+    await db.execute({
+      sql: "DELETE FROM announcement_sessions WHERE token_hash = ?",
+      args: [req.announcementSession.tokenHash],
+    });
+    return res.json({ success: true });
+  });
+
+  app.get("/api/vendor/announcement-recipients", requireAnnouncementSession("vendor"), async (req: any, res) => {
+    const search = typeof req.query.search === "string" ? req.query.search.trim().slice(0, 100) : "";
+    const query = search.replace(/[%_\\]/g, "\\$&");
+    try {
+      const result = await db.execute({
+        sql: `SELECT id, name, phone FROM customers
+              WHERE vendor_id = ? AND COALESCE(status, 'active') = 'active'
+                AND (? = '' OR name LIKE ? ESCAPE '\\')
+              ORDER BY name COLLATE NOCASE ASC LIMIT 500`,
+        args: [req.announcementSession.userId, query, `%${query}%`],
+      });
+      const countResult = await db.execute({
+        sql: "SELECT COUNT(*) AS count FROM customers WHERE vendor_id = ? AND COALESCE(status, 'active') = 'active'",
+        args: [req.announcementSession.userId],
+      });
+      return res.json({ success: true, customers: result.rows, customerCount: Number(countResult.rows[0]?.count || 0) });
+    } catch (error) {
+      console.error("[Announcements] Recipient list failed:", error);
+      return res.status(500).json({ success: false, message: "Unable to load assigned customers" });
+    }
+  });
+
+  app.get("/api/vendor/announcement-workers", requireAnnouncementSession("vendor"), async (req: any, res) => {
+    const search = typeof req.query.search === "string" ? req.query.search.trim().slice(0, 100) : "";
+    const query = search.replace(/[%_\\]/g, "\\$&");
+    try {
+      const result = await db.execute({
+        sql: `SELECT id, name, phone FROM workers
+              WHERE vendor_id = ? AND (? = '' OR name LIKE ? ESCAPE '\\')
+              ORDER BY name COLLATE NOCASE ASC LIMIT 500`,
+        args: [req.announcementSession.userId, query, `%${query}%`],
+      });
+      const countResult = await db.execute({
+        sql: "SELECT COUNT(*) AS count FROM workers WHERE vendor_id = ?",
+        args: [req.announcementSession.userId],
+      });
+      return res.json({ success: true, workers: result.rows, workerCount: Number(countResult.rows[0]?.count || 0) });
+    } catch (error) {
+      console.error("[Announcements] Worker recipient list failed:", error);
+      return res.status(500).json({ success: false, message: "Unable to load assigned workers" });
+    }
+  });
+
+  app.get("/api/vendor/announcements", requireAnnouncementSession("vendor"), async (req: any, res) => {
+    try {
+      const result = await db.execute({
+        sql: `SELECT a.id, a.title, a.message, a.category, a.created_at,
+                     CASE WHEN COALESCE(w.recipient_count, 0) > 0 THEN 'worker' ELSE 'customer' END AS recipient_type,
+                     COALESCE(c.recipient_count, w.recipient_count, 0) AS recipient_count,
+                     COALESCE(c.sms_submitted, w.sms_submitted, 0) AS sms_submitted,
+                     COALESCE(c.sms_delivered, w.sms_delivered, 0) AS sms_delivered,
+                     COALESCE(c.sms_failed, w.sms_failed, 0) AS sms_failed,
+                     COALESCE(c.sms_unknown, w.sms_unknown, 0) AS sms_unknown,
+                     COALESCE(c.sms_pending, w.sms_pending, 0) AS sms_pending
+              FROM announcements a
+              LEFT JOIN (
+                SELECT announcement_id, COUNT(*) AS recipient_count,
+                  SUM(CASE WHEN sms_status = 'submitted' THEN 1 ELSE 0 END) AS sms_submitted,
+                  SUM(CASE WHEN sms_status = 'delivered' THEN 1 ELSE 0 END) AS sms_delivered,
+                  SUM(CASE WHEN sms_status = 'failed' THEN 1 ELSE 0 END) AS sms_failed,
+                  SUM(CASE WHEN sms_status = 'unknown' THEN 1 ELSE 0 END) AS sms_unknown,
+                  SUM(CASE WHEN sms_status = 'pending' THEN 1 ELSE 0 END) AS sms_pending
+                FROM announcement_recipients GROUP BY announcement_id
+              ) c ON c.announcement_id = a.id
+              LEFT JOIN (
+                SELECT announcement_id, COUNT(*) AS recipient_count,
+                  SUM(CASE WHEN sms_status = 'submitted' THEN 1 ELSE 0 END) AS sms_submitted,
+                  SUM(CASE WHEN sms_status = 'delivered' THEN 1 ELSE 0 END) AS sms_delivered,
+                  SUM(CASE WHEN sms_status = 'failed' THEN 1 ELSE 0 END) AS sms_failed,
+                  SUM(CASE WHEN sms_status = 'unknown' THEN 1 ELSE 0 END) AS sms_unknown,
+                  SUM(CASE WHEN sms_status = 'pending' THEN 1 ELSE 0 END) AS sms_pending
+                FROM worker_announcement_recipients GROUP BY announcement_id
+              ) w ON w.announcement_id = a.id
+              WHERE a.vendor_id = ?
+              ORDER BY a.created_at DESC LIMIT 100`,
+        args: [req.announcementSession.userId],
+      });
+      return res.json({
+        success: true,
+        smsConfigured: announcementSmsConfiguration().configured,
+        announcements: result.rows,
+      });
+    } catch (error) {
+      console.error("[Announcements] Vendor history failed:", error);
+      return res.status(500).json({ success: false, message: "Unable to load announcement history" });
+    }
+  });
+
+  app.post("/api/vendor/announcements", requireAnnouncementSession("vendor"), async (req: any, res) => {
+    const { title, message, category, recipientType = "customer", customerIds, workerIds, sendToAll, idempotencyKey } = req.body || {};
+    const categories = new Set([
+      "Milk Delivery Update", "Delivery Delay", "Holiday Notice",
+      "Milk Rate Change", "Monthly Bill Reminder", "General Announcement",
+    ]);
+    const cleanTitle = typeof title === "string" ? title.trim() : "";
+    const cleanMessage = typeof message === "string" ? message.trim() : "";
+    const requestKey = typeof idempotencyKey === "string" ? idempotencyKey.trim() : "";
+    if (!cleanTitle || cleanTitle.length > 120) {
+      return res.status(400).json({ success: false, message: "Title is required and must be 120 characters or fewer" });
+    }
+    if (!cleanMessage || cleanMessage.length > 1800) {
+      return res.status(400).json({ success: false, message: "Message is required and must be 1,800 characters or fewer" });
+    }
+    if (!categories.has(category)) {
+      return res.status(400).json({ success: false, message: "Choose a valid announcement category" });
+    }
+    if (recipientType !== "customer" && recipientType !== "worker") {
+      return res.status(400).json({ success: false, message: "Choose customers or workers as recipients" });
+    }
+    if (!/^[A-Za-z0-9_-]{8,100}$/.test(requestKey)) {
+      return res.status(400).json({ success: false, message: "A valid request id is required" });
+    }
+    const selectedIds = recipientType === "worker" ? workerIds : customerIds;
+    if (typeof sendToAll !== "boolean" || (!sendToAll && !Array.isArray(selectedIds))) {
+      return res.status(400).json({ success: false, message: `Choose one or more assigned ${recipientType === "worker" ? "workers" : "customers"}` });
+    }
+
+    const vendorId = req.announcementSession.userId as number;
+    try {
+      const existing = await db.execute({
+        sql: "SELECT id FROM announcements WHERE vendor_id = ? AND idempotency_key = ?",
+        args: [vendorId, requestKey],
+      });
+      if (existing.rows[0]) {
+        const existingCount = await db.execute({
+          sql: `SELECT (SELECT COUNT(*) FROM announcement_recipients WHERE announcement_id = ?) +
+                       (SELECT COUNT(*) FROM worker_announcement_recipients WHERE announcement_id = ?) AS count`,
+          args: [existing.rows[0].id, existing.rows[0].id],
+        });
+        return res.json({
+          success: true,
+          duplicate: true,
+          announcementId: existing.rows[0].id,
+          recipientCount: Number(existingCount.rows[0]?.count || 0),
+          smsConfigured: announcementSmsConfiguration().configured,
+        });
+      }
+
+      let recipients: any[];
+      if (sendToAll) {
+        const assigned = await db.execute({
+          sql: recipientType === "worker"
+            ? "SELECT id, name, phone FROM workers WHERE vendor_id = ? ORDER BY id"
+            : "SELECT id, name, phone FROM customers WHERE vendor_id = ? AND COALESCE(status, 'active') = 'active' ORDER BY id",
+          args: [vendorId],
+        });
+        recipients = assigned.rows as any[];
+      } else {
+        const requestedIds = [...new Set((selectedIds as unknown[])
+          .map((id) => Number(id))
+          .filter((id) => Number.isSafeInteger(id) && id > 0))];
+        if (requestedIds.length === 0 || requestedIds.length !== selectedIds.length) {
+          return res.status(400).json({ success: false, message: `Select at least one valid ${recipientType === "worker" ? "worker" : "customer"}` });
+        }
+        if (requestedIds.length > 5000) {
+          return res.status(400).json({ success: false, message: "An announcement can include up to 5,000 individually selected recipients. Use 'Send to all' for your full assigned list." });
+        }
+        const placeholders = requestedIds.map(() => "?").join(",");
+        const selected = await db.execute({
+          sql: recipientType === "worker"
+            ? `SELECT id, name, phone FROM workers WHERE vendor_id = ? AND id IN (${placeholders})`
+            : `SELECT id, name, phone FROM customers WHERE vendor_id = ? AND id IN (${placeholders}) AND COALESCE(status, 'active') = 'active'`,
+          args: [vendorId, ...requestedIds],
+        });
+        recipients = selected.rows as any[];
+        if (recipients.length !== requestedIds.length) {
+          return res.status(403).json({ success: false, message: `One or more selected ${recipientType === "worker" ? "workers" : "customers"} are not assigned to your account` });
+        }
+      }
+      if (recipients.length === 0) {
+        return res.status(400).json({ success: false, message: `Select at least one assigned ${recipientType === "worker" ? "worker" : "active customer"}` });
+      }
+      if (!await consumeAnnouncementRateLimit(vendorId)) {
+        return res.status(429).json({ success: false, message: "Announcement limit reached. Try again in a few minutes." });
+      }
+
+      const id = randomUUID();
+      const createdAt = new Date().toISOString();
+      const recipientRecords = recipients.map((recipient) => ({
+        id: randomUUID(),
+        userId: Number(recipient.id),
+        phone: recipient.phone ? String(recipient.phone) : null,
+      }));
+      const smsRecipients = recipientRecords.map((recipient) => ({
+        recipientId: recipient.id,
+        phone: recipient.phone,
+      }));
+      const statements = [
+        {
+          sql: `INSERT INTO announcements (id, vendor_id, title, message, category, idempotency_key, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)`,
+          args: [id, vendorId, cleanTitle, cleanMessage, category, requestKey, createdAt],
+        },
+        ...recipientRecords.map((recipient) => ({
+          sql: `INSERT INTO ${recipientType === "worker" ? "worker_announcement_recipients" : "announcement_recipients"}
+                  (id, announcement_id, ${recipientType === "worker" ? "worker_id" : "customer_id"}, sms_status, in_app_read_status, created_at)
+                VALUES (?, ?, ?, 'pending', 'unread', ?)`,
+          args: [recipient.id, id, recipient.userId, createdAt],
+        })),
+      ];
+      await db.batch(statements, "write");
+
+      const vendorResult = await db.execute({ sql: "SELECT name FROM vendors WHERE id = ?", args: [vendorId] });
+      const vendorName = String((vendorResult.rows[0] as any)?.name || "Your Milk Vendor");
+      void sendAnnouncementSms(id, vendorName, {
+        title: cleanTitle,
+        message: cleanMessage,
+        category,
+      }, smsRecipients, recipientType === "worker" ? "worker_announcement_recipients" : "announcement_recipients").catch((error) => {
+        console.error("[Announcements] Background SMS processing failed:", error);
+      });
+
+      return res.status(201).json({
+        success: true,
+        announcementId: id,
+        recipientCount: recipientRecords.length,
+        recipientType,
+        smsConfigured: announcementSmsConfiguration().configured,
+      });
+    } catch (error) {
+      const errorMessage = String((error as any)?.message || error);
+      if (errorMessage.includes("UNIQUE constraint failed: announcements.vendor_id")) {
+        const duplicate = await db.execute({
+          sql: "SELECT id FROM announcements WHERE vendor_id = ? AND idempotency_key = ?",
+          args: [vendorId, requestKey],
+        });
+        if (duplicate.rows[0]) {
+          const existingCount = await db.execute({
+            sql: `SELECT (SELECT COUNT(*) FROM announcement_recipients WHERE announcement_id = ?) +
+                         (SELECT COUNT(*) FROM worker_announcement_recipients WHERE announcement_id = ?) AS count`,
+            args: [duplicate.rows[0].id, duplicate.rows[0].id],
+          });
+          return res.json({
+            success: true,
+            duplicate: true,
+            announcementId: duplicate.rows[0].id,
+            recipientCount: Number(existingCount.rows[0]?.count || 0),
+            smsConfigured: announcementSmsConfiguration().configured,
+          });
+        }
+      }
+      console.error("[Announcements] Create failed:", error);
+      return res.status(500).json({ success: false, message: "Unable to save announcement" });
+    }
+  });
+
+  app.post("/api/vendor/announcements/:id/send-sms", requireAnnouncementSession("vendor"), async (req: any, res) => {
+    const vendorId = req.announcementSession.userId as number;
+    const config = announcementSmsConfiguration();
+    if (!config.configured) {
+      return res.status(409).json({ success: false, message: "Configure the approved announcement DLT sender, template, and variables before submitting SMS" });
+    }
+    try {
+      const announcementResult = await db.execute({
+        sql: "SELECT id, title, message, category FROM announcements WHERE id = ? AND vendor_id = ?",
+        args: [req.params.id, vendorId],
+      });
+      const announcement = announcementResult.rows[0] as any;
+      if (!announcement) return res.status(404).json({ success: false, message: "Announcement not found" });
+
+      const vendorResult = await db.execute({ sql: "SELECT name FROM vendors WHERE id = ?", args: [vendorId] });
+      const workerRecipientResult = await db.execute({
+        sql: `SELECT ar.id AS recipient_id, w.phone
+              FROM worker_announcement_recipients ar
+              JOIN workers w ON w.id = ar.worker_id
+              WHERE ar.announcement_id = ? AND ar.sms_status = 'pending'`,
+        args: [announcement.id],
+      });
+      const recipientTable = workerRecipientResult.rows.length > 0
+        ? "worker_announcement_recipients" as const
+        : "announcement_recipients" as const;
+      const recipientResult = workerRecipientResult.rows.length > 0 ? workerRecipientResult : await db.execute({
+        sql: `SELECT ar.id AS recipient_id, c.phone
+              FROM announcement_recipients ar
+              JOIN customers c ON c.id = ar.customer_id
+              WHERE ar.announcement_id = ? AND ar.sms_status = 'pending'`,
+        args: [announcement.id],
+      });
+      if (recipientResult.rows.length === 0) {
+        return res.status(409).json({ success: false, message: "No pending SMS submissions are available to retry" });
+      }
+      if (!await consumeAnnouncementRateLimit(vendorId)) {
+        return res.status(429).json({ success: false, message: "Announcement limit reached. Try again in a few minutes." });
+      }
+
+      const smsRecipients = recipientResult.rows.map((recipient: any) => ({
+        recipientId: String(recipient.recipient_id),
+        phone: recipient.phone ? String(recipient.phone) : null,
+      }));
+      void sendAnnouncementSms(
+        String(announcement.id),
+        String((vendorResult.rows[0] as any)?.name || "Your Milk Vendor"),
+        { title: String(announcement.title), message: String(announcement.message), category: String(announcement.category) },
+        smsRecipients,
+        recipientTable,
+      ).catch((error) => console.error("[Announcements] SMS retry failed:", error));
+
+      return res.status(202).json({ success: true, queuedCount: smsRecipients.length });
+    } catch (error) {
+      console.error("[Announcements] SMS retry request failed:", error);
+      return res.status(500).json({ success: false, message: "Unable to submit pending SMS" });
+    }
+  });
+
+  app.get("/api/announcements/unread-count", requireAnnouncementSession("customer"), async (req: any, res) => {
+    try {
+      const result = await db.execute({
+        sql: `SELECT COUNT(*) AS count FROM announcement_recipients
+              WHERE customer_id = ? AND in_app_read_status = 'unread'`,
+        args: [req.announcementSession.userId],
+      });
+      return res.json({ success: true, count: Number(result.rows[0]?.count || 0) });
+    } catch (error) {
+      console.error("[Announcements] Unread count failed:", error);
+      return res.status(500).json({ success: false, message: "Unable to load unread notifications" });
+    }
+  });
+
+  app.get("/api/announcements", requireAnnouncementSession("customer"), async (req: any, res) => {
+    const unreadOnly = req.query.filter === "unread";
+    try {
+      const result = await db.execute({
+        sql: `SELECT ar.id AS recipient_id, a.id AS announcement_id, a.title, a.message, a.category,
+                     v.name AS vendor_name, ar.in_app_read_status, ar.read_at, ar.created_at
+              FROM announcement_recipients ar
+              JOIN announcements a ON a.id = ar.announcement_id
+              JOIN vendors v ON v.id = a.vendor_id
+              WHERE ar.customer_id = ? ${unreadOnly ? "AND ar.in_app_read_status = 'unread'" : ""}
+              ORDER BY ar.created_at DESC LIMIT 100`,
+        args: [req.announcementSession.userId],
+      });
+      return res.json({ success: true, notifications: result.rows });
+    } catch (error) {
+      console.error("[Announcements] Customer notification list failed:", error);
+      return res.status(500).json({ success: false, message: "Unable to load notifications" });
+    }
+  });
+
+  app.patch("/api/announcements/:recipientId/read", requireAnnouncementSession("customer"), async (req: any, res) => {
+    try {
+      const result = await db.execute({
+        sql: `UPDATE announcement_recipients
+              SET in_app_read_status = 'read', read_at = COALESCE(read_at, CURRENT_TIMESTAMP)
+              WHERE id = ? AND customer_id = ?`,
+        args: [req.params.recipientId, req.announcementSession.userId],
+      });
+      if (Number(result.rowsAffected || 0) === 0) {
+        return res.status(404).json({ success: false, message: "Notification not found" });
+      }
+      return res.json({ success: true });
+    } catch (error) {
+      console.error("[Announcements] Mark read failed:", error);
+      return res.status(500).json({ success: false, message: "Unable to update notification" });
+    }
+  });
+
+  app.patch("/api/announcements/read-all", requireAnnouncementSession("customer"), async (req: any, res) => {
+    try {
+      await db.execute({
+        sql: `UPDATE announcement_recipients
+              SET in_app_read_status = 'read', read_at = CURRENT_TIMESTAMP
+              WHERE customer_id = ? AND in_app_read_status = 'unread'`,
+        args: [req.announcementSession.userId],
+      });
+      return res.json({ success: true });
+    } catch (error) {
+      console.error("[Announcements] Mark all read failed:", error);
+      return res.status(500).json({ success: false, message: "Unable to update notifications" });
+    }
+  });
+
+  app.get("/api/worker/announcements/unread-count", requireAnnouncementSession("worker"), async (req: any, res) => {
+    try {
+      const result = await db.execute({
+        sql: `SELECT COUNT(*) AS count FROM worker_announcement_recipients
+              WHERE worker_id = ? AND in_app_read_status = 'unread'`,
+        args: [req.announcementSession.userId],
+      });
+      return res.json({ success: true, count: Number(result.rows[0]?.count || 0) });
+    } catch (error) {
+      console.error("[Announcements] Worker unread count failed:", error);
+      return res.status(500).json({ success: false, message: "Unable to load unread notifications" });
+    }
+  });
+
+  app.get("/api/worker/announcements", requireAnnouncementSession("worker"), async (req: any, res) => {
+    const unreadOnly = req.query.filter === "unread";
+    try {
+      const result = await db.execute({
+        sql: `SELECT ar.id AS recipient_id, a.id AS announcement_id, a.title, a.message, a.category,
+                     v.name AS vendor_name, ar.in_app_read_status, ar.read_at, ar.created_at
+              FROM worker_announcement_recipients ar
+              JOIN announcements a ON a.id = ar.announcement_id
+              JOIN vendors v ON v.id = a.vendor_id
+              WHERE ar.worker_id = ? ${unreadOnly ? "AND ar.in_app_read_status = 'unread'" : ""}
+              ORDER BY ar.created_at DESC LIMIT 100`,
+        args: [req.announcementSession.userId],
+      });
+      return res.json({ success: true, notifications: result.rows });
+    } catch (error) {
+      console.error("[Announcements] Worker notification list failed:", error);
+      return res.status(500).json({ success: false, message: "Unable to load notifications" });
+    }
+  });
+
+  app.patch("/api/worker/announcements/:recipientId/read", requireAnnouncementSession("worker"), async (req: any, res) => {
+    try {
+      const result = await db.execute({
+        sql: `UPDATE worker_announcement_recipients
+              SET in_app_read_status = 'read', read_at = COALESCE(read_at, CURRENT_TIMESTAMP)
+              WHERE id = ? AND worker_id = ?`,
+        args: [req.params.recipientId, req.announcementSession.userId],
+      });
+      if (Number(result.rowsAffected || 0) === 0) {
+        return res.status(404).json({ success: false, message: "Notification not found" });
+      }
+      return res.json({ success: true });
+    } catch (error) {
+      console.error("[Announcements] Worker mark read failed:", error);
+      return res.status(500).json({ success: false, message: "Unable to update notification" });
+    }
+  });
+
+  app.patch("/api/worker/announcements/read-all", requireAnnouncementSession("worker"), async (req: any, res) => {
+    try {
+      await db.execute({
+        sql: `UPDATE worker_announcement_recipients
+              SET in_app_read_status = 'read', read_at = CURRENT_TIMESTAMP
+              WHERE worker_id = ? AND in_app_read_status = 'unread'`,
+        args: [req.announcementSession.userId],
+      });
+      return res.json({ success: true });
+    } catch (error) {
+      console.error("[Announcements] Worker mark all read failed:", error);
+      return res.status(500).json({ success: false, message: "Unable to update notifications" });
+    }
   });
 
   // ─── PROFILE PICTURE UPLOAD ──────────────────────────────────────────────────
@@ -1697,9 +2652,44 @@ async function startServer() {
     }
   });
 
-  // ─── GET /api/missing-entries ───────────────────────────────────────────────
-  // Checks missing AM / PM milk entries for Customers and Vendors
-  app.get("/api/missing-entries", async (req, res) => {
+  // ─── MISSING MILK ENTRIES (Historical Detection) ───────────────────────────
+  // Helper functions for Asia/Kolkata (IST, UTC+5:30) date handling
+  const getISTDateString = (d: Date = new Date()): string => {
+    return new Intl.DateTimeFormat("en-CA", {
+      timeZone: "Asia/Kolkata",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).format(d);
+  };
+
+  const getPastDateIST = (daysAgo: number, baseDateStr: string): string => {
+    const [y, m, d] = baseDateStr.split("-").map(Number);
+    const dt = new Date(Date.UTC(y, m - 1, d - daysAgo));
+    return `${dt.getUTCFullYear()}-${String(dt.getUTCMonth() + 1).padStart(2, "0")}-${String(dt.getUTCDate()).padStart(2, "0")}`;
+  };
+
+  const calculateDaysOverdue = (dateStr: string, todayStr: string): number => {
+    const [y1, m1, d1] = dateStr.split("-").map(Number);
+    const [y2, m2, d2] = todayStr.split("-").map(Number);
+    const t1 = Date.UTC(y1, m1 - 1, d1);
+    const t2 = Date.UTC(y2, m2 - 1, d2);
+    return Math.max(0, Math.round((t2 - t1) / 86400000));
+  };
+
+  const generateDatesInRange = (from: string, to: string): string[] => {
+    const dates: string[] = [];
+    const cur = new Date(`${from}T00:00:00Z`);
+    const end = new Date(`${to}T00:00:00Z`);
+    while (cur <= end) {
+      dates.push(`${cur.getUTCFullYear()}-${String(cur.getUTCMonth() + 1).padStart(2, "0")}-${String(cur.getUTCDate()).padStart(2, "0")}`);
+      cur.setUTCDate(cur.getUTCDate() + 1);
+    }
+    return dates;
+  };
+
+  // Checks missing AM / PM milk entries across all applicable dates (today, yesterday, older)
+  const handleMissingEntries = async (req: express.Request, res: express.Response) => {
     try {
       const authHeader = req.headers.authorization;
       let token = "";
@@ -1718,7 +2708,14 @@ async function startServer() {
         role = "vendor";
         if (!vendorId) vendorId = token.replace("vendor-token-", "");
       } else if (token.startsWith("worker-token-")) {
-        role = "worker";
+        const workerId = token.replace("worker-token-", "");
+        const wRes = await db.execute({ sql: "SELECT vendor_id FROM workers WHERE id = ?", args: [workerId] });
+        if (wRes.rows[0]?.vendor_id) {
+          vendorId = String(wRes.rows[0].vendor_id);
+          role = "vendor";
+        } else {
+          role = "worker";
+        }
       } else if (token === "admin-token") {
         role = "admin";
       }
@@ -1729,293 +2726,394 @@ async function startServer() {
         else if (vendorId) role = "vendor";
       }
 
-      // Neither customer nor vendor
+      const emptyGroups = { today: [], yesterday: [], older: [] };
       if (role !== "customer" && role !== "vendor") {
         return res.json({
           role: role || "unknown",
-          count: 0,
           isApplicable: false,
-          amMissing: false,
-          pmMissing: false,
+          count: 0,
+          totalCount: 0,
+          todayCount: 0,
+          yesterdayCount: 0,
+          olderCount: 0,
+          groups: emptyGroups,
           entries: [],
           message: "",
         });
       }
 
-      // Local date YYYY-MM-DD
-      const now = new Date();
-      const localToday = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
-      const date = typeof req.query.date === "string" && req.query.date.match(/^\d{4}-\d{2}-\d{2}$/)
-        ? req.query.date
-        : localToday;
+      // Business timezone: Asia/Kolkata
+      const todayIST = getISTDateString();
+      const yesterdayIST = getPastDateIST(1, todayIST);
+
+      // Lookback window: default 3 months (covers current month + previous 3 months)
+      const monthsBack = Math.min(12, Math.max(1, parseInt(String(req.query.months || "3"), 10) || 3));
+      const [curYear, curMonth] = todayIST.split("-").map(Number);
+      const startOfLookback = new Date(Date.UTC(curYear, (curMonth - 1) - monthsBack, 1));
+      const defaultLookbackStart = `${startOfLookback.getUTCFullYear()}-${String(startOfLookback.getUTCMonth() + 1).padStart(2, "0")}-01`;
+
+      const requestedStart = typeof req.query.startDate === "string" && req.query.startDate.match(/^\d{4}-\d{2}-\d{2}$/)
+        ? req.query.startDate
+        : defaultLookbackStart;
 
       // ── CUSTOMER FLOW ──
       if (role === "customer") {
         if (!customerId) {
-          return res.json({ role: "customer", count: 0, isApplicable: false, entries: [] });
+          return res.json({ role: "customer", isApplicable: false, count: 0, totalCount: 0, todayCount: 0, yesterdayCount: 0, olderCount: 0, groups: emptyGroups, entries: [] });
         }
 
         const cRes = await db.execute({
-          sql: "SELECT id, name, status, schedule FROM customers WHERE id = ?",
+          sql: "SELECT id, name, status, schedule, created_at FROM customers WHERE id = ?",
           args: [customerId],
         });
-        const customer = cRes.rows[0];
+        const customer = cRes.rows[0] as any;
         if (!customer) {
           return res.status(404).json({ success: false, message: "Customer not found" });
         }
 
-        const status = (customer.status as string) || "active";
-        // Avoid false alerts if inactive or suspended
+        const status = String(customer.status || "active").toLowerCase();
         if (status === "inactive" || status === "suspended") {
           return res.json({
             role: "customer",
-            date,
+            isApplicable: false,
             customerId: customer.id,
             customerName: customer.name,
-            isApplicable: false,
             count: 0,
-            amMissing: false,
-            pmMissing: false,
+            totalCount: 0,
+            todayCount: 0,
+            yesterdayCount: 0,
+            olderCount: 0,
+            groups: emptyGroups,
             entries: [],
             reason: `Account is ${status}`,
           });
         }
 
-        const schedule = ((customer.schedule as string) || "both").toUpperCase();
+        const schedule = String(customer.schedule || "both").toUpperCase();
         if (schedule === "NONE") {
           return res.json({
             role: "customer",
-            date,
+            isApplicable: false,
             customerId: customer.id,
             customerName: customer.name,
-            isApplicable: false,
             count: 0,
-            amMissing: false,
-            pmMissing: false,
+            totalCount: 0,
+            todayCount: 0,
+            yesterdayCount: 0,
+            olderCount: 0,
+            groups: emptyGroups,
             entries: [],
-            reason: "Milk collection not scheduled for today",
+            reason: "Milk collection not scheduled",
           });
         }
 
         const requiresAM = schedule === "BOTH" || schedule === "AM";
         const requiresPM = schedule === "BOTH" || schedule === "PM";
 
-        let amMissing = false;
-        let pmMissing = false;
+        // Respect customer activation date: do not flag dates before account creation
+        const customerCreatedDate = customer.created_at ? String(customer.created_at).slice(0, 10) : requestedStart;
+        const effectiveStart = customerCreatedDate > requestedStart ? customerCreatedDate : requestedStart;
 
-        if (requiresAM) {
-          const amRes = await db.execute({
-            sql: "SELECT id, liters FROM milk_entries WHERE customer_id = ? AND date = ? AND shift = 'AM' AND liters > 0",
-            args: [customerId, date],
+        const dates = generateDatesInRange(effectiveStart, todayIST);
+        if (dates.length === 0) {
+          return res.json({
+            role: "customer",
+            isApplicable: true,
+            customerId: customer.id,
+            customerName: customer.name,
+            date: todayIST,
+            todayIST,
+            yesterdayIST,
+            count: 0,
+            totalCount: 0,
+            todayCount: 0,
+            yesterdayCount: 0,
+            olderCount: 0,
+            groups: emptyGroups,
+            entries: [],
           });
-          if (!amRes.rows || amRes.rows.length === 0) {
-            amMissing = true;
+        }
+
+        // Fetch all existing entries in range
+        const existingRes = await db.execute({
+          sql: "SELECT date, shift FROM milk_entries WHERE customer_id = ? AND date >= ? AND date <= ? AND liters > 0",
+          args: [customerId, effectiveStart, todayIST],
+        });
+        const existingSet = new Set<string>();
+        for (const row of existingRes.rows as any[]) {
+          existingSet.add(`${String(row.date).slice(0, 10)}_${row.shift}`);
+        }
+
+        const missingToday: any[] = [];
+        const missingYesterday: any[] = [];
+        const missingOlder: any[] = [];
+
+        for (const d of dates) {
+          const overdue = calculateDaysOverdue(d, todayIST);
+          const group = d === todayIST ? "today" : d === yesterdayIST ? "yesterday" : "older";
+
+          if (requiresAM && !existingSet.has(`${d}_AM`)) {
+            const item = {
+              customerId: Number(customer.id),
+              customerName: String(customer.name),
+              date: d,
+              shift: "AM" as const,
+              daysOverdue: overdue,
+              status: "missing" as const,
+              group,
+              label: `AM milk entry missing: ${d}`,
+              detail: `Your AM milk entry for ${d} has not been recorded.`,
+            };
+            if (group === "today") missingToday.push(item);
+            else if (group === "yesterday") missingYesterday.push(item);
+            else missingOlder.push(item);
+          }
+
+          if (requiresPM && !existingSet.has(`${d}_PM`)) {
+            const item = {
+              customerId: Number(customer.id),
+              customerName: String(customer.name),
+              date: d,
+              shift: "PM" as const,
+              daysOverdue: overdue,
+              status: "missing" as const,
+              group,
+              label: `PM milk entry missing: ${d}`,
+              detail: `Your PM milk entry for ${d} has not been recorded.`,
+            };
+            if (group === "today") missingToday.push(item);
+            else if (group === "yesterday") missingYesterday.push(item);
+            else missingOlder.push(item);
           }
         }
 
-        if (requiresPM) {
-          const pmRes = await db.execute({
-            sql: "SELECT id, liters FROM milk_entries WHERE customer_id = ? AND date = ? AND shift = 'PM' AND liters > 0",
-            args: [customerId, date],
-          });
-          if (!pmRes.rows || pmRes.rows.length === 0) {
-            pmMissing = true;
-          }
-        }
+        // Sort older: newest date first, then AM/PM
+        missingOlder.sort((a, b) => b.date.localeCompare(a.date) || a.shift.localeCompare(b.shift));
 
-        const entries: Array<{ shift: "AM" | "PM"; label: string; detail: string; status: "pending" }> = [];
-        if (amMissing) {
-          entries.push({
-            shift: "AM",
-            label: "AM milk entry is pending.",
-            detail: "Your AM milk entry for today has not been entered.",
-            status: "pending",
-          });
-        }
-        if (pmMissing) {
-          entries.push({
-            shift: "PM",
-            label: "PM milk entry is pending.",
-            detail: "Your PM milk entry for today has not been entered.",
-            status: "pending",
-          });
-        }
-
-        let message = "";
-        let title = "";
-        if (amMissing && pmMissing) {
-          title = "Today's AM and PM milk entries are pending.";
-          message = "Today's AM and PM milk entries are pending.";
-        } else if (amMissing) {
-          title = "AM Milk Entry Pending";
-          message = "AM milk entry is pending.";
-        } else if (pmMissing) {
-          title = "PM Milk Entry Pending";
-          message = "PM milk entry is pending.";
-        }
+        const allEntries = [...missingToday, ...missingYesterday, ...missingOlder];
+        const totalCount = allEntries.length;
+        const amMissingToday = missingToday.some(e => e.shift === "AM");
+        const pmMissingToday = missingToday.some(e => e.shift === "PM");
 
         return res.json({
           role: "customer",
-          date,
+          isApplicable: true,
           customerId: customer.id,
           customerName: customer.name,
-          isApplicable: true,
-          count: entries.length,
-          amMissing,
-          pmMissing,
-          title,
-          message,
-          entries,
+          date: todayIST,
+          todayIST,
+          yesterdayIST,
+          count: totalCount,
+          totalCount,
+          todayCount: missingToday.length,
+          yesterdayCount: missingYesterday.length,
+          olderCount: missingOlder.length,
+          groups: {
+            today: missingToday,
+            yesterday: missingYesterday,
+            older: missingOlder,
+          },
+          entries: allEntries,
+          amMissing: amMissingToday,
+          pmMissing: pmMissingToday,
+          amMissingCount: amMissingToday ? 1 : 0,
+          pmMissingCount: pmMissingToday ? 1 : 0,
+          title: totalCount > 0 ? `${totalCount} milk entries missing` : "All entries up to date",
+          message: totalCount > 0 ? `${totalCount} milk entries require attention` : "",
         });
       }
 
       // ── VENDOR FLOW ──
       if (role === "vendor") {
         if (!vendorId) {
-          return res.json({ role: "vendor", count: 0, isApplicable: false, entries: [] });
+          return res.json({ role: "vendor", isApplicable: false, count: 0, totalCount: 0, todayCount: 0, yesterdayCount: 0, olderCount: 0, groups: emptyGroups, entries: [] });
         }
 
         const vRes = await db.execute({
-          sql: "SELECT id, name, status, schedule FROM vendors WHERE id = ?",
+          sql: "SELECT id, name, status, created_at FROM vendors WHERE id = ?",
           args: [vendorId],
         });
-        const vendor = vRes.rows[0];
+        const vendor = vRes.rows[0] as any;
         if (!vendor) {
           return res.status(404).json({ success: false, message: "Vendor not found" });
         }
 
-        const vStatus = (vendor.status as string) || "active";
+        const vStatus = String(vendor.status || "active").toLowerCase();
         if (vStatus === "inactive" || vStatus === "suspended") {
           return res.json({
             role: "vendor",
-            date,
+            isApplicable: false,
             vendorId: vendor.id,
             vendorName: vendor.name,
-            isApplicable: false,
             count: 0,
+            totalCount: 0,
+            todayCount: 0,
+            yesterdayCount: 0,
+            olderCount: 0,
+            groups: emptyGroups,
             entries: [],
-            reason: `Vendor account is ${vStatus}`,
+            reason: `Vendor is ${vStatus}`,
           });
         }
 
-        // Get all active customers linked to this vendor
+        // Get all active customers for this vendor
         const custRes = await db.execute({
-          sql: `SELECT id, name, customer_code, status, schedule 
-                FROM customers 
+          sql: `SELECT id, name, customer_code, status, schedule, created_at
+                FROM customers
                 WHERE vendor_id = ? AND (status IS NULL OR status = 'active')`,
           args: [vendorId],
         });
 
-        const activeCustomers = custRes.rows;
+        const activeCustomers = custRes.rows as any[];
         if (!activeCustomers || activeCustomers.length === 0) {
           return res.json({
             role: "vendor",
-            date,
+            isApplicable: true,
             vendorId: vendor.id,
             vendorName: vendor.name,
-            isApplicable: true,
+            date: todayIST,
+            todayIST,
+            yesterdayIST,
             count: 0,
-            amMissing: false,
-            pmMissing: false,
+            totalCount: 0,
+            todayCount: 0,
+            yesterdayCount: 0,
+            olderCount: 0,
+            groups: emptyGroups,
             entries: [],
           });
         }
 
-        // Fetch all milk entries for today for this vendor's customers
+        // Vendor creation date bounds lookback start
+        const vendorCreatedDate = vendor.created_at ? String(vendor.created_at).slice(0, 10) : requestedStart;
+        const vendorEffectiveStart = vendorCreatedDate > requestedStart ? vendorCreatedDate : requestedStart;
+
+        // Fetch all milk entries in date range for all of vendor's customers (single fast query)
         const entriesRes = await db.execute({
-          sql: `SELECT e.customer_id, e.shift, e.liters 
+          sql: `SELECT e.customer_id, e.date, e.shift
                 FROM milk_entries e
                 JOIN customers c ON e.customer_id = c.id
-                WHERE c.vendor_id = ? AND e.date = ? AND e.liters > 0`,
-          args: [vendorId, date],
+                WHERE c.vendor_id = ? AND e.date >= ? AND e.date <= ? AND e.liters > 0`,
+          args: [vendorId, vendorEffectiveStart, todayIST],
         });
 
         const recordedSet = new Set<string>();
-        for (const row of entriesRes.rows) {
-          recordedSet.add(`${row.customer_id}_${row.shift}`);
+        for (const row of entriesRes.rows as any[]) {
+          recordedSet.add(`${row.customer_id}_${String(row.date).slice(0, 10)}_${row.shift}`);
         }
 
-        const missingEntries: Array<{
-          customerId: number;
-          customerName: string;
-          customerCode?: string;
-          shift: "AM" | "PM";
-          label: string;
-          detail: string;
-          status: "pending";
-        }> = [];
-
-        let amMissingCount = 0;
-        let pmMissingCount = 0;
+        const missingToday: any[] = [];
+        const missingYesterday: any[] = [];
+        const missingOlder: any[] = [];
 
         for (const c of activeCustomers) {
-          const cSched = ((c.schedule as string) || "both").toUpperCase();
+          const cSched = String(c.schedule || "both").toUpperCase();
           if (cSched === "NONE") continue;
 
           const reqAM = cSched === "BOTH" || cSched === "AM";
           const reqPM = cSched === "BOTH" || cSched === "PM";
 
-          if (reqAM && !recordedSet.has(`${c.id}_AM`)) {
-            amMissingCount++;
-            missingEntries.push({
-              customerId: Number(c.id),
-              customerName: String(c.name),
-              customerCode: c.customer_code ? String(c.customer_code) : undefined,
-              shift: "AM",
-              label: `AM milk entry pending: ${c.name}`,
-              detail: `AM milk entry for ${c.name} has not been entered.`,
-              status: "pending",
-            });
-          }
+          // Respect customer's own start/activation date
+          const custCreatedDate = c.created_at ? String(c.created_at).slice(0, 10) : vendorEffectiveStart;
+          const custEffectiveStart = custCreatedDate > vendorEffectiveStart ? custCreatedDate : vendorEffectiveStart;
 
-          if (reqPM && !recordedSet.has(`${c.id}_PM`)) {
-            pmMissingCount++;
-            missingEntries.push({
-              customerId: Number(c.id),
-              customerName: String(c.name),
-              customerCode: c.customer_code ? String(c.customer_code) : undefined,
-              shift: "PM",
-              label: `PM milk entry pending: ${c.name}`,
-              detail: `PM milk entry for ${c.name} has not been entered.`,
-              status: "pending",
-            });
+          const dates = generateDatesInRange(custEffectiveStart, todayIST);
+          for (const d of dates) {
+            const overdue = calculateDaysOverdue(d, todayIST);
+            const group = d === todayIST ? "today" : d === yesterdayIST ? "yesterday" : "older";
+
+            if (reqAM && !recordedSet.has(`${c.id}_${d}_AM`)) {
+              const item = {
+                customerId: Number(c.id),
+                customerName: String(c.name),
+                customerCode: c.customer_code ? String(c.customer_code) : undefined,
+                date: d,
+                shift: "AM" as const,
+                daysOverdue: overdue,
+                status: "missing" as const,
+                group,
+                label: `AM milk entry missing: ${c.name} (${d})`,
+                detail: `AM milk entry for ${c.name} on ${d} has not been recorded.`,
+              };
+              if (group === "today") missingToday.push(item);
+              else if (group === "yesterday") missingYesterday.push(item);
+              else missingOlder.push(item);
+            }
+
+            if (reqPM && !recordedSet.has(`${c.id}_${d}_PM`)) {
+              const item = {
+                customerId: Number(c.id),
+                customerName: String(c.name),
+                customerCode: c.customer_code ? String(c.customer_code) : undefined,
+                date: d,
+                shift: "PM" as const,
+                daysOverdue: overdue,
+                status: "missing" as const,
+                group,
+                label: `PM milk entry missing: ${c.name} (${d})`,
+                detail: `PM milk entry for ${c.name} on ${d} has not been recorded.`,
+              };
+              if (group === "today") missingToday.push(item);
+              else if (group === "yesterday") missingYesterday.push(item);
+              else missingOlder.push(item);
+            }
           }
         }
 
-        let message = "";
-        let title = "";
-        if (amMissingCount > 0 && pmMissingCount > 0) {
-          title = "Today's AM and PM milk entries are pending.";
-          message = "Today's AM and PM milk entries are pending.";
-        } else if (amMissingCount > 0) {
-          title = "AM Milk Entry Pending";
-          message = "AM milk entry is pending.";
-        } else if (pmMissingCount > 0) {
-          title = "PM Milk Entry Pending";
-          message = "PM milk entry is pending.";
-        }
+        // Sorting: today & yesterday by customerName then shift; older by date DESC then customerName
+        const sortByNameAndShift = (a: any, b: any) => {
+          const nameCmp = (a.customerName || "").localeCompare(b.customerName || "");
+          if (nameCmp !== 0) return nameCmp;
+          return a.shift.localeCompare(b.shift);
+        };
+        missingToday.sort(sortByNameAndShift);
+        missingYesterday.sort(sortByNameAndShift);
+        missingOlder.sort((a, b) => {
+          const dateCmp = b.date.localeCompare(a.date);
+          if (dateCmp !== 0) return dateCmp;
+          return sortByNameAndShift(a, b);
+        });
+
+        const allEntries = [...missingToday, ...missingYesterday, ...missingOlder];
+        const totalCount = allEntries.length;
+        const amMissingTodayCount = missingToday.filter(e => e.shift === "AM").length;
+        const pmMissingTodayCount = missingToday.filter(e => e.shift === "PM").length;
 
         return res.json({
           role: "vendor",
-          date,
+          isApplicable: true,
           vendorId: vendor.id,
           vendorName: vendor.name,
-          isApplicable: true,
-          count: missingEntries.length,
-          amMissing: amMissingCount > 0,
-          pmMissing: pmMissingCount > 0,
-          amMissingCount,
-          pmMissingCount,
-          title,
-          message,
-          entries: missingEntries,
+          date: todayIST,
+          todayIST,
+          yesterdayIST,
+          count: totalCount,
+          totalCount,
+          todayCount: missingToday.length,
+          yesterdayCount: missingYesterday.length,
+          olderCount: missingOlder.length,
+          groups: {
+            today: missingToday,
+            yesterday: missingYesterday,
+            older: missingOlder,
+          },
+          entries: allEntries,
+          amMissing: amMissingTodayCount > 0,
+          pmMissing: pmMissingTodayCount > 0,
+          amMissingCount: amMissingTodayCount,
+          pmMissingCount: pmMissingTodayCount,
+          title: totalCount > 0 ? `${totalCount} milk entries missing` : "All entries up to date",
+          message: totalCount > 0 ? `${totalCount} milk entries require attention` : "",
         });
       }
     } catch (err: any) {
       console.error("[GET /api/missing-entries] Error:", err);
       res.status(500).json({ success: false, message: "Internal server error" });
     }
-  });
+  };
+
+  app.get("/api/missing-entries", handleMissingEntries);
+  app.get("/api/missing-entries/historical", handleMissingEntries);
 
   app.delete("/api/entries/:id", async (req, res) => {
     const id = parseInt(req.params.id);
@@ -2289,6 +3387,28 @@ async function startServer() {
       for (const row of attendanceResult.rows as any[]) {
         attendanceMap[String(row.worker_id)] = row;
       }
+      const salaryMonthName = new Date(Number(month.split("-")[0]), Number(month.split("-")[1]) - 1, 1)
+        .toLocaleString("en-IN", { month: "long", year: "numeric" });
+      const salaryMonthNameTamil = new Date(Number(month.split("-")[0]), Number(month.split("-")[1]) - 1, 1)
+        .toLocaleString("ta-IN", { month: "long", year: "numeric" });
+      const paymentsResult = await db.execute({
+        sql: `SELECT p.recipient_id AS worker_id, p.date, p.note
+              FROM payments p
+              JOIN workers w ON p.recipient_id = w.id
+              WHERE p.recipient_type = 'worker' AND w.vendor_id = ?`,
+        args: [vendorId],
+      });
+      const paidSalaryMap: Record<string, string> = {};
+      for (const payment of paymentsResult.rows as any[]) {
+        const note = String(payment.note || "");
+        const isCurrentSalary = note.includes(`[salary-month:${month}]`) ||
+          note === `Salary for ${salaryMonthName}` ||
+          note === `Salary for ${salaryMonthNameTamil}`;
+        if (isCurrentSalary && (!paidSalaryMap[String(payment.worker_id)] ||
+            String(payment.date) > paidSalaryMap[String(payment.worker_id)])) {
+          paidSalaryMap[String(payment.worker_id)] = String(payment.date);
+        }
+      }
       const [year, mon] = month.split("-").map(Number);
       const totalWorkingDays = new Date(year, mon, 0).getDate();
 
@@ -2313,6 +3433,8 @@ async function startServer() {
           per_day_salary: Math.round(perDaySalary * 100) / 100,
           salary_deduction: Math.round(salaryDeduction * 100) / 100,
           final_salary: Math.round(finalSalary * 100) / 100,
+          salary_paid: Boolean(paidSalaryMap[String(w.id)]),
+          salary_paid_date: paidSalaryMap[String(w.id)] || null,
         };
       });
       res.json(summary);
@@ -2370,11 +3492,14 @@ async function startServer() {
 
   // ─── PAYMENTS ───────────────────────────────────────────────────────────────
   app.post("/api/payments", async (req, res) => {
-    const { recipient_type, recipient_id, amount, payment_mode = 'cash', reference_no, date, note } = req.body;
+    const { recipient_type, recipient_id, amount, payment_mode = 'cash', reference_no, date, note, salary_month } = req.body;
     try {
+      const paymentNote = recipient_type === 'worker' && /^\d{4}-\d{2}$/.test(salary_month || '')
+        ? `${note || 'Salary Payment'} [salary-month:${salary_month}]`
+        : note || null;
       const result = await db.execute({
         sql: "INSERT INTO payments (recipient_type, recipient_id, amount, payment_mode, reference_no, date, note) VALUES (?, ?, ?, ?, ?, ?, ?)",
-        args: [recipient_type, recipient_id, amount, payment_mode, reference_no || null, date, note || null],
+        args: [recipient_type, recipient_id, amount, payment_mode, reference_no || null, date, paymentNote],
       });
       if (recipient_type === 'customer') {
         // NOTE: billing payments are recorded in the payments table only.
@@ -2384,8 +3509,8 @@ async function startServer() {
       if (recipient_type === 'worker') {
         // Record salary credit in worker's account
         await db.execute({
-          sql: "INSERT INTO worker_credits (worker_id, amount, date, note, payment_mode, reference_no) VALUES (?, ?, ?, ?, ?, ?)",
-          args: [recipient_id, amount, date, note || 'Salary Payment', payment_mode, reference_no || null],
+          sql: "INSERT INTO worker_credits (worker_id, amount, date, note, salary_month, payment_mode, reference_no) VALUES (?, ?, ?, ?, ?, ?, ?)",
+          args: [recipient_id, amount, date, note || 'Salary Payment', salary_month || null, payment_mode, reference_no || null],
         });
       }
       res.json({ success: true, id: Number(result.lastInsertRowid) });
@@ -2618,6 +3743,58 @@ async function startServer() {
   });
 
   // ─── STATS ──────────────────────────────────────────────────────────────────
+  app.get("/api/milk-trends", async (req, res) => {
+    const startDate = typeof req.query.startDate === "string" ? req.query.startDate : "";
+    const endDate = typeof req.query.endDate === "string" ? req.query.endDate : "";
+    const datePattern = /^\d{4}-\d{2}-\d{2}$/;
+    if (!datePattern.test(startDate) || !datePattern.test(endDate) || startDate > endDate) {
+      return res.status(400).json({ message: "A valid start and end date are required." });
+    }
+    const customerId = typeof req.query.customerId === "string" ? req.query.customerId : undefined;
+    const vendorId = typeof req.query.vendorId === "string" ? req.query.vendorId : undefined;
+    const workerId = typeof req.query.workerId === "string" ? req.query.workerId : undefined;
+
+    const conditions = ["e.date >= ?", "e.date <= ?"];
+    const args: (string | number)[] = [startDate, endDate];
+    let joins = "";
+    if (customerId) {
+      conditions.push("e.customer_id = ?");
+      args.push(customerId);
+    } else if (vendorId) {
+      joins = " JOIN customers c ON c.id = e.customer_id";
+      conditions.push("c.vendor_id = ?");
+      args.push(vendorId);
+    } else if (workerId) {
+      conditions.push("e.worker_id = ?");
+      args.push(workerId);
+    }
+
+    const result = await db.execute({
+      sql: `SELECT e.date,
+                   SUM(CASE WHEN e.shift = 'AM' THEN e.liters ELSE 0 END) AS am_liters,
+                   SUM(CASE WHEN e.shift = 'PM' THEN e.liters ELSE 0 END) AS pm_liters,
+                   SUM(e.liters) AS total_liters,
+                   SUM(CASE WHEN e.shift = 'AM' THEN 1 ELSE 0 END) AS am_entries,
+                   SUM(CASE WHEN e.shift = 'PM' THEN 1 ELSE 0 END) AS pm_entries,
+                   COUNT(*) AS entry_count
+            FROM milk_entries e${joins}
+            WHERE ${conditions.join(" AND ")}
+            GROUP BY e.date
+            ORDER BY e.date ASC`,
+      args,
+    });
+
+    res.json({
+      scope: customerId ? "customer" : vendorId ? "vendor" : workerId ? "worker" : "business",
+      entries: result.rows.map((row: any) => ({
+        date: String(row.date),
+        amLiters: Number(row.am_entries) > 0 ? Number(row.am_liters) : null,
+        pmLiters: Number(row.pm_entries) > 0 ? Number(row.pm_liters) : null,
+        totalLiters: Number(row.entry_count) > 0 ? Number(row.total_liters) : null,
+      })),
+    });
+  });
+
   app.get("/api/stats", async (req, res) => {
     const customerId = typeof req.query.customerId === "string" ? req.query.customerId : undefined;
     const vendorId = typeof req.query.vendorId === "string" ? req.query.vendorId : undefined;
@@ -2870,6 +4047,7 @@ async function startServer() {
       feedPurchases: feedR.rows,
       feedReductions: feedReductionR.rows,
       payments: payR.rows,
+      totalCashAdvances: (borrR.rows[0]?.total as number) || 0,
       advanceBalance: ((borrR.rows[0]?.total as number) || 0) - ((repR.rows[0]?.total as number) || 0),
     });
   });

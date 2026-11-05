@@ -45,6 +45,8 @@ export interface WorkerSalarySummary {
   per_day_salary: number;
   salary_deduction: number;
   final_salary: number;
+  salary_paid?: boolean;
+  salary_paid_date?: string | null;
 }
 export interface Customer {
   id: string;
@@ -208,20 +210,36 @@ export interface MissingEntryItem {
   customerName?: string;
   customerCode?: string;
   shift: 'AM' | 'PM';
+  date?: string;
+  daysOverdue?: number;
+  group?: 'today' | 'yesterday' | 'older';
   label: string;
   detail: string;
-  status?: 'pending';
+  status?: 'pending' | 'missing';
+}
+
+export interface MissingEntriesGroups {
+  today: MissingEntryItem[];
+  yesterday: MissingEntryItem[];
+  older: MissingEntryItem[];
 }
 
 export interface MissingEntriesResponse {
   role: 'customer' | 'vendor' | 'admin' | 'worker' | 'unknown';
-  date: string;
+  date?: string;
+  todayIST?: string;
+  yesterdayIST?: string;
   customerId?: number;
   customerName?: string;
   vendorId?: number;
   vendorName?: string;
   isApplicable: boolean;
   count: number;
+  totalCount?: number;
+  todayCount?: number;
+  yesterdayCount?: number;
+  olderCount?: number;
+  groups?: MissingEntriesGroups;
   amMissing?: boolean;
   pmMissing?: boolean;
   amMissingCount?: number;
@@ -232,3 +250,8 @@ export interface MissingEntriesResponse {
   entries: MissingEntryItem[];
 }
 
+// ─── Historical Missing Entries (aliases) ───────────────────────────────────
+
+export type HistoricalMissingEntryItem = MissingEntryItem;
+export type HistoricalMissingGroups = MissingEntriesGroups;
+export type HistoricalMissingEntriesResponse = MissingEntriesResponse;

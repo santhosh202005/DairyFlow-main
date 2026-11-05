@@ -93,6 +93,14 @@ export default function WorkerManagement({ vendorId }: WorkerManagementProps) {
 
   useEffect(() => { fetchWorkers(); }, [vendorId]);
   useEffect(() => { fetchSalary(); }, [fetchSalary]);
+  useEffect(() => {
+    const handleSalaryPaymentRecorded = (event: Event) => {
+      const { salaryMonth: paidMonth } = (event as CustomEvent<{ salaryMonth?: string }>).detail || {};
+      if (!paidMonth || paidMonth === monthStr) fetchSalary();
+    };
+    window.addEventListener('worker-salary-payment-recorded', handleSalaryPaymentRecorded);
+    return () => window.removeEventListener('worker-salary-payment-recorded', handleSalaryPaymentRecorded);
+  }, [fetchSalary, monthStr]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -440,6 +448,7 @@ export default function WorkerManagement({ vendorId }: WorkerManagementProps) {
                         <th className="px-5 py-3.5 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">{t('absent')}</th>
                         <th className="px-5 py-3.5 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">{t('totalDeductions')}</th>
                         <th className="px-5 py-3.5 text-[10px] font-black text-slate-400 uppercase tracking-widest text-right">{t('finalSalary')}</th>
+                        <th className="px-5 py-3.5 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">{t('salaryPaid')}</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-50">
@@ -496,6 +505,20 @@ export default function WorkerManagement({ vendorId }: WorkerManagementProps) {
                                 ₹{s.final_salary.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
                               </span>
                             </td>
+                            <td className="px-5 py-4 text-center">
+                              {s.salary_paid ? (
+                                <span className="inline-flex flex-col items-center gap-1 px-2.5 py-1.5 bg-emerald-50 text-emerald-700 rounded-lg text-xs font-bold">
+                                  <span className="inline-flex items-center gap-1"><CheckCircle2 size={12} /> {t('salaryPaid')}</span>
+                                  {s.salary_paid_date && (
+                                    <span className="text-[10px] font-medium text-emerald-600">
+                                      {new Date(`${s.salary_paid_date}T00:00:00`).toLocaleDateString(locale)}
+                                    </span>
+                                  )}
+                                </span>
+                              ) : (
+                                <span className="text-xs text-slate-400 font-medium">{t('unpaid')}</span>
+                              )}
+                            </td>
                           </motion.tr>
                         );
                       })}
@@ -520,6 +543,12 @@ export default function WorkerManagement({ vendorId }: WorkerManagementProps) {
                             <div>
                               <p className="font-bold text-slate-800 text-sm">{s.worker_name}</p>
                               {noSalaryConfig && <p className="text-[10px] text-amber-500 font-bold">⚠ {t('salaryNotConfigured')}</p>}
+                              {s.salary_paid && (
+                                <p className="text-[10px] text-emerald-700 font-bold flex items-center gap-1 mt-1">
+                                  <CheckCircle2 size={11} /> {t('salaryPaid')}
+                                  {s.salary_paid_date && ` · ${new Date(`${s.salary_paid_date}T00:00:00`).toLocaleDateString(locale)}`}
+                                </p>
+                              )}
                             </div>
                           </div>
                           <div className="text-right">

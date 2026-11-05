@@ -471,6 +471,87 @@ app.delete("/api/feed-purchases/:id", async (req: Request, res: Response): Promi
 //  DASHBOARD STATS
 // ============================================================
 
+app.get("/api/milk-trends", async (req: Request, res: Response): Promise<any> => {
+  const startDate = req.query.startDate as string | undefined;
+  const endDate = req.query.endDate as string | undefined;
+  const datePattern = /^\d{4}-\d{2}-\d{2}$/;
+  if (!startDate || !endDate || !datePattern.test(startDate) || !datePattern.test(endDate) || startDate > endDate) {
+    return res.status(400).json({ message: "A valid start and end date are required." });
+  }
+
+  const customerId = req.query.customerId as string | undefined;
+  const vendorId = req.query.vendorId as string | undefined;
+  const workerId = req.query.workerId as string | undefined;
+  let query: FirebaseFirestore.Query = db.collection("milk_entries")
+    .where("date", ">=", startDate)
+    .where("date", "<=", endDate);
+
+  if (customerId) {
+    query = query.where("customer_id", "==", customerId);
+  } else if (workerId) {
+    query = query.where("worker_id", "==", Number(workerId));
+  }
+
+  const snapshot = await query.get();
+  let customerIds: Set<string> | null = null;
+  if (vendorId) {
+    const vendorValues: Array<string | number> = [vendorId];
+    const numericVendorId = Number(vendorId);
+    if (Number.isFinite(numericVendorId) && String(numericVendorId) !== vendorId) {
+      vendorValues.push(numericVendorId);
+    }
+    const customerSnapshots = await Promise.all(
+      vendorValues.map((value) => db.collection("customers").where("vendor_id", "==", value).get())
+    );
+    customerIds = new Set(customerSnapshots.flatMap((customers) => customers.docs.map((doc) => doc.id)));
+  }
+  const daily = new Map<string, {
+    amLiters: number;
+    pmLiters: number;
+    totalLiters: number;
+    amEntries: number;
+    pmEntries: number;
+    entryCount: number;
+  }>();
+
+  snapshot.docs.forEach((doc) => {
+    const entry = doc.data();
+    if (customerIds && !customerIds.has(String(entry.customer_id))) return;
+
+    const date = String(entry.date || "");
+    if (!datePattern.test(date)) return;
+    const record = daily.get(date) || {
+      amLiters: 0,
+      pmLiters: 0,
+      totalLiters: 0,
+      amEntries: 0,
+      pmEntries: 0,
+      entryCount: 0,
+    };
+    const liters = Number(entry.liters) || 0;
+    if (entry.shift === "AM") {
+      record.amLiters += liters;
+      record.amEntries += 1;
+    } else if (entry.shift === "PM") {
+      record.pmLiters += liters;
+      record.pmEntries += 1;
+    }
+    record.totalLiters += liters;
+    record.entryCount += 1;
+    daily.set(date, record);
+  });
+
+  res.json({
+    scope: customerId ? "customer" : vendorId ? "vendor" : workerId ? "worker" : "business",
+    entries: [...daily.entries()].sort(([left], [right]) => left.localeCompare(right)).map(([date, record]) => ({
+      date,
+      amLiters: record.amEntries > 0 ? record.amLiters : null,
+      pmLiters: record.pmEntries > 0 ? record.pmLiters : null,
+      totalLiters: record.entryCount > 0 ? record.totalLiters : null,
+    })),
+  });
+});
+
 app.get("/api/stats", async (req: Request, res: Response): Promise<any> => {
   const customerId = req.query.customerId as string | undefined;
   const today = new Date().toISOString().split("T")[0];

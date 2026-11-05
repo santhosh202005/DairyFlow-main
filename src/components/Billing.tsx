@@ -21,6 +21,7 @@ import {
   Pencil,
   CheckCircle,
   AlertTriangle,
+  Receipt,
   X as XIcon
 } from 'lucide-react';
 
@@ -31,6 +32,8 @@ import SearchBar from './SearchBar';
 import { useDebouncedValue } from '../hooks/useDebouncedValue';
 import { useTranslation } from '../i18n';
 import SendMoneyModal from './SendMoneyModal';
+import BillingPdfModal, { DocType } from './BillingPdfModal';
+import ReceiptHistoryModal from './ReceiptHistoryModal';
 
 interface BillingProps {
   customerId?: string;
@@ -57,7 +60,9 @@ export default function Billing({ customerId, isWorker = false, workerId, isCust
     feedPurchases: any[];
     feedReductions: any[];
     payments?: any[];
+    totalCashAdvances?: number;
     advanceBalance?: number;
+    previousBalance?: number;
   } | null>(null);
   const [detailError, setDetailError] = useState<string | null>(null);
   
@@ -84,6 +89,12 @@ export default function Billing({ customerId, isWorker = false, workerId, isCust
   const debouncedSearch = useDebouncedValue(search, 400);
   const [viewingDetails, setViewingDetails] = useState<string | null>(customerId || null);
 
+  // ─── PDF Generation & History State ───────────────────────────────────────
+  const [showPdfModal, setShowPdfModal] = useState(false);
+  const [pdfDocType, setPdfDocType] = useState<DocType>('bill');
+  const [pdfPaymentTarget, setPdfPaymentTarget] = useState<any>(null);
+  const [showHistoryModal, setShowHistoryModal] = useState(false);
+
   // ─── Rate Editor State (vendor-only) ─────────────────────────────────────
   const [showRateEditor, setShowRateEditor] = useState(false);
   const [newRate, setNewRate] = useState('');
@@ -100,7 +111,7 @@ export default function Billing({ customerId, isWorker = false, workerId, isCust
         startDate: customStart, 
         endDate: customEnd, 
         label: `${customStart} to ${customEnd}`,
-        shortLabel: 'Custom'
+        shortLabel: t('customRange')
       };
     }
     const [yearStr, mStr] = monthStr.split('-');
@@ -115,28 +126,28 @@ export default function Billing({ customerId, isWorker = false, workerId, isCust
         startDate: `${year}-${pad(m)}-01`,
         endDate: `${year}-${pad(m)}-10`,
         label: `1 – 10 ${monthName} (${t('cycleLabel')} 1)`,
-        shortLabel: '1st - 10th',
+        shortLabel: t('cycleFirstTen'),
       };
     } else if (cycle === '11-20') {
       return {
         startDate: `${year}-${pad(m)}-11`,
         endDate: `${year}-${pad(m)}-20`,
         label: `11 – 20 ${monthName} (${t('cycleLabel')} 2)`,
-        shortLabel: '11th - 20th',
+        shortLabel: t('cycleElevenTwenty'),
       };
     } else if (cycle === '21-end') {
       return {
         startDate: `${year}-${pad(m)}-21`,
         endDate: `${year}-${pad(m)}-${pad(lastDay)}`,
         label: `21 – ${lastDay} ${monthName} (${t('cycleLabel')} 3)`,
-        shortLabel: '21st - End',
+        shortLabel: t('cycleTwentyEnd'),
       };
     } else {
       return {
         startDate: `${year}-${pad(m)}-01`,
         endDate: `${year}-${pad(m)}-${pad(lastDay)}`,
         label: `${monthName} (${t('entireMonth')})`,
-        shortLabel: 'Full Month',
+        shortLabel: t('cycleFullMonth'),
       };
     }
   };
@@ -422,9 +433,11 @@ export default function Billing({ customerId, isWorker = false, workerId, isCust
     }
 
     const totalMilkAmount = detailedData.milkEntries.reduce((acc, curr) => acc + curr.amount, 0);
-    const totalCashAdvances = (detailedData.advances || [])
-      .filter((a: any) => a.type !== 'deduction')
-      .reduce((acc, curr: any) => acc + curr.amount, 0);
+    const totalCashAdvances = detailedData.totalCashAdvances !== undefined
+      ? Number(detailedData.totalCashAdvances) || 0
+      : (detailedData.advances || [])
+        .filter((a: any) => a.type !== 'deduction')
+        .reduce((acc, curr: any) => acc + (Number(curr.amount) || 0), 0);
     const totalBillDeductions = (detailedData.advances || [])
       .filter((a: any) => a.type === 'deduction')
       .reduce((acc, curr: any) => acc + curr.amount, 0);
@@ -476,6 +489,17 @@ export default function Billing({ customerId, isWorker = false, workerId, isCust
               onChange={(e) => setSelectedMonth(e.target.value)}
               className="flex-1 md:w-36 px-2.5 py-1.5 rounded-lg text-xs font-bold text-slate-700 focus:bg-slate-50 outline-none transition-all"
             />
+            <button 
+              onClick={() => {
+                setPdfDocType('bill');
+                setPdfPaymentTarget(null);
+                setShowPdfModal(true);
+              }}
+              className="px-3.5 py-2 bg-gradient-to-r from-emerald-600 to-teal-700 hover:from-emerald-700 hover:to-teal-800 text-white font-bold text-xs rounded-lg md:rounded-xl transition-all flex items-center gap-1.5 shadow-sm touch-btn"
+              title={t('pdfBillTitle')}
+            >
+              <FileText size={15} /> <span>{t('pdfStatement')}</span>
+            </button>
             <button 
               onClick={() => window.print()}
               className="w-9 h-9 md:w-10 md:h-10 flex items-center justify-center border border-slate-100 rounded-lg md:rounded-xl text-slate-400 hover:text-slate-900 hover:bg-slate-50 transition-all touch-btn"
@@ -947,6 +971,16 @@ export default function Billing({ customerId, isWorker = false, workerId, isCust
                         </button>
                       )}
                       <button 
+                        onClick={() => {
+                          setPdfDocType('bill');
+                          setPdfPaymentTarget(null);
+                          setShowPdfModal(true);
+                        }}
+                        className="w-full py-2.5 md:py-3 bg-gradient-to-r from-emerald-600 to-teal-700 hover:from-emerald-700 hover:to-teal-800 text-white rounded-xl text-xs font-black uppercase tracking-wider transition-all flex items-center justify-center gap-1.5 touch-btn shadow-md"
+                      >
+                        <FileText size={14} /> {t('pdfStatementsAndReceipts')}
+                      </button>
+                      <button 
                         onClick={() => window.print()}
                         className="w-full py-2.5 md:py-3 bg-white/10 hover:bg-white/20 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all touch-btn text-center"
                       >
@@ -1069,7 +1103,7 @@ export default function Billing({ customerId, isWorker = false, workerId, isCust
                     </tr>
                   ))}
                   {detailedData.milkEntries.length === 0 && (
-                    <tr><td colSpan={isWorker ? 3 : 5} className="py-6 text-center text-slate-300 italic font-medium text-sm">No milk entries recorded for this cycle period.</td></tr>
+                    <tr><td colSpan={isWorker ? 3 : 5} className="py-6 text-center text-slate-300 italic font-medium text-sm">{t('noMilkEntriesForCycle')}</td></tr>
                   )}
                   <tr className="bg-slate-50">
                     <td colSpan={2} className="px-4 md:px-8 py-3 md:py-4 text-xs md:text-sm font-black text-slate-900 uppercase">{t('subtotal')}</td>
@@ -1289,6 +1323,7 @@ export default function Billing({ customerId, isWorker = false, workerId, isCust
                         <th className="px-4 md:px-8 py-2.5 md:py-4 text-[10px] font-black text-slate-500 uppercase tracking-widest">{t('paymentMode')}</th>
                         <th className="hidden sm:table-cell px-4 md:px-8 py-2.5 md:py-4 text-[10px] font-black text-slate-500 uppercase tracking-widest">{t('referenceNo')}</th>
                         <th className="px-4 md:px-8 py-2.5 md:py-4 text-[10px] font-black text-slate-500 uppercase tracking-widest text-right">{t('amount')}</th>
+                        <th className="px-4 md:px-8 py-2.5 md:py-4 text-[10px] font-black text-slate-500 uppercase tracking-widest text-center">{t('receiptNumber')}</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-50">
@@ -1312,10 +1347,23 @@ export default function Billing({ customerId, isWorker = false, workerId, isCust
                           <td className="px-4 md:px-8 py-2.5 md:py-4 text-right text-xs md:text-sm font-display font-black text-emerald-600">
                             + ₹{p.amount.toFixed(0)}
                           </td>
+                          <td className="px-4 md:px-8 py-2.5 md:py-4 text-center">
+                            <button
+                              onClick={() => {
+                                setPdfPaymentTarget(p);
+                                setPdfDocType('payment');
+                                setShowPdfModal(true);
+                              }}
+                              className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-teal-50 hover:bg-teal-100 text-teal-700 text-[10px] font-bold border border-teal-200 transition-all touch-btn shadow-sm"
+                              title={t('generatePaymentReceiptPdf')}
+                            >
+                              <Receipt size={11} /> PDF
+                            </button>
+                          </td>
                         </tr>
                       ))}
                       {(!detailedData.payments || detailedData.payments.length === 0) && (
-                        <tr><td colSpan={4} className="py-6 text-center text-slate-300 italic font-medium text-sm">{t('noCreditsYet')}</td></tr>
+                        <tr><td colSpan={5} className="py-6 text-center text-slate-300 italic font-medium text-sm">{t('noCreditsYet')}</td></tr>
                       )}
                     </tbody>
                   </table>
@@ -1334,16 +1382,28 @@ export default function Billing({ customerId, isWorker = false, workerId, isCust
                         </div>
                         <p className="shrink-0 text-sm font-black text-emerald-700">+ ₹{Number(payment.amount).toFixed(2)}</p>
                       </div>
-                      <div className="mt-2 flex flex-wrap items-center gap-2">
-                        <span className="inline-flex items-center gap-1 rounded-full border border-emerald-100 bg-emerald-50 px-2 py-0.5 text-[9px] font-black uppercase text-emerald-700">
-                          {getPaymentModeIcon(payment.payment_mode)}
-                          {getPaymentModeLabel(payment.payment_mode)}
-                        </span>
-                        {payment.reference_no && (
-                          <span className="text-[10px] font-mono text-slate-500">
-                            {t('referenceNo')}: {payment.reference_no}
+                      <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
+                        <div className="flex items-center gap-2">
+                          <span className="inline-flex items-center gap-1 rounded-full border border-emerald-100 bg-emerald-50 px-2 py-0.5 text-[9px] font-black uppercase text-emerald-700">
+                            {getPaymentModeIcon(payment.payment_mode)}
+                            {getPaymentModeLabel(payment.payment_mode)}
                           </span>
-                        )}
+                          {payment.reference_no && (
+                            <span className="text-[10px] font-mono text-slate-500">
+                              {t('referenceNo')}: {payment.reference_no}
+                            </span>
+                          )}
+                        </div>
+                        <button
+                          onClick={() => {
+                            setPdfPaymentTarget(payment);
+                            setPdfDocType('payment');
+                            setShowPdfModal(true);
+                          }}
+                          className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-teal-50 border border-teal-200 text-teal-700 text-[10px] font-bold touch-btn"
+                        >
+                          <Receipt size={10} /> PDF Receipt
+                        </button>
                       </div>
                     </div>
                   ))}
@@ -1374,6 +1434,26 @@ export default function Billing({ customerId, isWorker = false, workerId, isCust
             }}
           />
         )}
+
+        {/* PDF Document Generation Modal */}
+        <BillingPdfModal
+          isOpen={showPdfModal}
+          onClose={() => {
+            setShowPdfModal(false);
+            setPdfPaymentTarget(null);
+          }}
+          initialDocType={pdfDocType}
+          detailedData={detailedData}
+          selectedMonth={selectedMonth}
+          cycleInfo={currentCycleInfo}
+          singlePayment={pdfPaymentTarget}
+        />
+
+        {/* Receipt History Modal */}
+        <ReceiptHistoryModal
+          isOpen={showHistoryModal}
+          onClose={() => setShowHistoryModal(false)}
+        />
       </div>
     );
   }
@@ -1401,7 +1481,7 @@ export default function Billing({ customerId, isWorker = false, workerId, isCust
             {t('settlementJournal').split(' ')[0]} <span className="text-emerald-600">{t('settlementJournal').split(' ').slice(1).join(' ')}</span>
           </h2>
           <p className="text-xs text-slate-400 font-medium mt-0.5">
-            Active Cycle: <span className="font-bold text-slate-700">{currentCycleInfo.label}</span>
+            {t('activeCycle')}: <span className="font-bold text-slate-700">{currentCycleInfo.label}</span>
           </p>
         </div>
 
@@ -1420,6 +1500,14 @@ export default function Billing({ customerId, isWorker = false, workerId, isCust
             title={t('printStatement')}
           >
             <Printer size={16} />
+          </button>
+          <button 
+            onClick={() => setShowHistoryModal(true)}
+            className="flex items-center gap-1.5 bg-white border border-slate-200 text-slate-700 hover:text-slate-900 hover:bg-slate-50 px-3.5 md:px-5 py-2.5 md:py-3 rounded-xl font-bold text-xs uppercase tracking-wider hover:border-slate-300 transition-all shadow-soft active:scale-95 touch-btn"
+            title={t('viewSavedReceipts')}
+          >
+            <Clock size={15} className="text-emerald-600" />
+            <span className="hidden sm:inline">{t('receiptHistory')}</span>
           </button>
           <button 
             onClick={handleExportExcel}
@@ -1456,7 +1544,7 @@ export default function Billing({ customerId, isWorker = false, workerId, isCust
                 {!isWorker && <th className="px-4 md:px-6 py-4 md:py-5 font-black text-slate-500 text-[10px] uppercase tracking-[0.2em]">{t('cattleFeedDetails')}</th>}
                 {!isWorker && <th className="px-4 md:px-6 py-4 md:py-5 font-black text-slate-500 text-[10px] uppercase tracking-[0.2em] text-right">{t('debt')}</th>}
                 {!isWorker && <th className="px-4 md:px-6 py-4 md:py-5 font-black text-slate-500 text-[10px] uppercase tracking-[0.2em] text-right">{t('netSettlement')}</th>}
-                <th className="px-4 md:px-6 py-4 md:py-5 font-black text-slate-500 text-[10px] uppercase tracking-[0.2em] text-center">Action / Pay</th>
+                <th className="px-4 md:px-6 py-4 md:py-5 font-black text-slate-500 text-[10px] uppercase tracking-[0.2em] text-center">{t('actionPay')}</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-50">
@@ -1519,15 +1607,26 @@ export default function Billing({ customerId, isWorker = false, workerId, isCust
                             note: `Milk Payout (${currentCycleInfo.shortLabel} ${selectedMonth})`
                           })}
                           className="inline-flex items-center gap-1 px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-sm transition-all touch-btn"
-                          title="Pay via Dynamic UPI QR"
+                          title={t('payViaDynamicUpiQr')}
                         >
                           <QrCode size={13} /> Pay UPI
                         </button>
                       )}
                       <button 
+                        onClick={() => {
+                          setViewingDetails(record.customer_id);
+                          setPdfDocType('bill');
+                          setShowPdfModal(true);
+                        }}
+                        className="w-9 h-9 rounded-xl bg-emerald-50 border border-emerald-100 flex items-center justify-center text-emerald-700 hover:bg-emerald-100 hover:border-emerald-200 shadow-soft transition-all active:scale-90 touch-btn"
+                        title={t('generatePdfStatement')}
+                      >
+                        <Download size={14} />
+                      </button>
+                      <button 
                         onClick={() => setViewingDetails(record.customer_id)}
                         className="w-9 h-9 rounded-xl bg-white border border-slate-100 flex items-center justify-center text-slate-400 hover:text-emerald-600 hover:border-emerald-200 hover:bg-emerald-50 shadow-soft transition-all active:scale-90 touch-btn"
-                        title="View Statement"
+                        title={t('viewStatement')}
                       >
                         <FileText size={16} />
                       </button>
@@ -1542,7 +1641,7 @@ export default function Billing({ customerId, isWorker = false, workerId, isCust
                       <Search size={32} />
                     </div>
                     <p className="text-base font-display font-bold text-slate-400">{t('noRecordsFound')}</p>
-                    <p className="text-sm text-slate-300 font-medium">No milk entries recorded for this cycle period.</p>
+                    <p className="text-sm text-slate-300 font-medium">{t('noMilkEntriesForCycle')}</p>
                   </td>
                 </tr>
               )}
@@ -1562,7 +1661,7 @@ export default function Billing({ customerId, isWorker = false, workerId, isCust
               <Search size={24} />
             </div>
             <p className="text-sm font-bold text-slate-400">{t('noRecords')}</p>
-            <p className="text-xs text-slate-300 mt-1">No entries found for {currentCycleInfo.shortLabel}.</p>
+            <p className="text-xs text-slate-300 mt-1">{t('noEntriesForCycle').replace('{cycle}', currentCycleInfo.shortLabel)}</p>
           </div>
         )}
         {filteredBilling.map((record: any) => (
@@ -1580,12 +1679,25 @@ export default function Billing({ customerId, isWorker = false, workerId, isCust
                   {record.upi_id && <span className="ml-1 text-emerald-600 font-mono font-medium">· {record.upi_id}</span>}
                 </p>
               </div>
-              <button 
-                onClick={() => setViewingDetails(record.customer_id)}
-                className="flex items-center gap-1 px-3 py-1.5 rounded-xl bg-slate-100 text-slate-700 text-[11px] font-black uppercase tracking-wide touch-btn"
-              >
-                {t('view')} <ChevronRight size={12} />
-              </button>
+              <div className="flex items-center gap-1.5 shrink-0">
+                <button 
+                  onClick={() => {
+                    setViewingDetails(record.customer_id);
+                    setPdfDocType('bill');
+                    setShowPdfModal(true);
+                  }}
+                  className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-emerald-50 border border-emerald-100 text-emerald-700 text-[11px] font-bold touch-btn"
+                  title={t('pdfStatement')}
+                >
+                  <Download size={11} /> PDF
+                </button>
+                <button 
+                  onClick={() => setViewingDetails(record.customer_id)}
+                  className="flex items-center gap-1 px-3 py-1.5 rounded-xl bg-slate-100 text-slate-700 text-[11px] font-black uppercase tracking-wide touch-btn"
+                >
+                  {t('view')} <ChevronRight size={12} />
+                </button>
+              </div>
             </div>
 
             {!isWorker && (
@@ -1681,6 +1793,26 @@ export default function Billing({ customerId, isWorker = false, workerId, isCust
           }}
         />
       )}
+
+      {/* PDF Document Generation Modal */}
+      <BillingPdfModal
+        isOpen={showPdfModal}
+        onClose={() => {
+          setShowPdfModal(false);
+          setPdfPaymentTarget(null);
+        }}
+        initialDocType={pdfDocType}
+        detailedData={detailedData}
+        selectedMonth={selectedMonth}
+        cycleInfo={currentCycleInfo}
+        singlePayment={pdfPaymentTarget}
+      />
+
+      {/* Receipt History Modal */}
+      <ReceiptHistoryModal
+        isOpen={showHistoryModal}
+        onClose={() => setShowHistoryModal(false)}
+      />
     </div>
   );
 }

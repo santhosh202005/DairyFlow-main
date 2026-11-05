@@ -16,6 +16,7 @@ interface MilkEntriesProps {
   defaultRate?: number;
   initialShift?: 'AM' | 'PM';
   initialCustomerId?: string;
+  initialDate?: string;
   autoOpenModal?: boolean;
   onAutoOpenHandled?: () => void;
 }
@@ -86,6 +87,7 @@ export default function MilkEntries({
   defaultRate,
   initialShift,
   initialCustomerId,
+  initialDate,
   autoOpenModal,
   onAutoOpenHandled,
 }: MilkEntriesProps) {
@@ -120,7 +122,7 @@ export default function MilkEntries({
 
   const [formData, setFormData] = useState({
     customer_id: initialCustomerId || (customerId ? customerId.toString() : ''),
-    date: getLocalDateKey(),
+    date: initialDate || getLocalDateKey(),
     shift: (initialShift || 'AM') as 'AM' | 'PM',
     liters: '',
     rate: defaultRate?.toString() || '',
@@ -130,15 +132,23 @@ export default function MilkEntries({
   useEffect(() => {
     if (autoOpenModal) {
       setIsModalOpen(true);
+      const targetDate = initialDate || getLocalDateKey();
+      if (initialDate && initialDate.length >= 7) {
+        const [yr, mo] = initialDate.split('-').map(Number);
+        if (yr && mo) {
+          setSelectedYear(yr);
+          setSelectedMonthIndex(mo - 1);
+        }
+      }
       setFormData(prev => ({
         ...prev,
         shift: initialShift || prev.shift,
         customer_id: initialCustomerId || prev.customer_id,
-        date: getLocalDateKey(),
+        date: targetDate,
       }));
       onAutoOpenHandled?.();
     }
-  }, [autoOpenModal, initialShift, initialCustomerId, onAutoOpenHandled]);
+  }, [autoOpenModal, initialShift, initialCustomerId, initialDate, onAutoOpenHandled]);
 
   useEffect(() => {
     if (customerId) {
@@ -498,28 +508,49 @@ export default function MilkEntries({
   const isMobileTiny = typeof window !== 'undefined' ? window.innerWidth <= 540 : false;
 
   const monthLabel = `${monthNames[selectedMonthIndex]} ${selectedYear}`;
+  const canCreateEntry = isAdmin || isVendor || Boolean(customerId);
+
+  const handleOpenNewEntry = () => {
+    setFormData(prev => ({
+      ...prev,
+      customer_id: customerId ? customerId.toString() : prev.customer_id,
+      date: getLocalDateKey(),
+    }));
+    setIsModalOpen(true);
+  };
 
   return (
     <div className="space-y-4 md:space-y-10 relative">
 
       <div className="bg-white rounded-2xl md:rounded-[2.5rem] shadow-soft border border-slate-100 p-4 md:p-6 space-y-4">
         {/* Top controls */}
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <div className="flex items-center justify-between gap-3">
-            <div>
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div className="flex min-w-0 items-start justify-between gap-3">
+            <div className="min-w-0">
               <h2 className="page-title">{t('supplyJournal')}</h2>
               <p className="text-slate-500 text-sm">{isAdmin ? t('trackDailyCollections') : t('monitorContributions')}</p>
             </div>
+            {canCreateEntry && (
+              <button
+                type="button"
+                onClick={handleOpenNewEntry}
+                className="touch-btn flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-emerald-600 text-white shadow-md shadow-emerald-600/20 transition hover:bg-emerald-700 active:scale-95 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2"
+                aria-label={t('newEntry')}
+                title={t('newEntry')}
+              >
+                <Plus size={22} strokeWidth={2.5} />
+              </button>
+            )}
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex w-full items-center gap-2 sm:w-auto sm:shrink-0">
             {/* Month + Year */}
-            <div className="flex items-center gap-2">
+            <div className="flex w-full items-center gap-2 sm:w-auto">
               <div className="relative">
                 <select
                   value={selectedMonthIndex}
                   onChange={(e) => setSelectedMonthIndex(parseInt(e.target.value, 10))}
-                  className="input-base !pr-8 !py-2.5 bg-white"
+                  className="input-base w-full !pr-8 !py-2.5 bg-white sm:w-auto"
                   aria-label="Select month"
                 >
                   {monthNames.map((m, i) => (
@@ -531,7 +562,7 @@ export default function MilkEntries({
                 <select
                   value={selectedYear}
                   onChange={(e) => setSelectedYear(parseInt(e.target.value, 10))}
-                  className="input-base !pr-8 !py-2.5 bg-white"
+                  className="input-base w-full !pr-8 !py-2.5 bg-white sm:w-auto"
                   aria-label="Select year"
                 >
                   {Array.from({ length: 6 }).map((_, idx) => {
@@ -597,63 +628,6 @@ export default function MilkEntries({
           </div>
         </div>
       </div>
-
-      {/* Fixed Add Entry: desktop — hidden while sheet is open */}
-      <AnimatePresence>
-        {(isAdmin || isVendor || Boolean(customerId)) && !isModalOpen && (
-          <motion.button
-            key="fab-desktop"
-            initial={{ opacity: 0, scale: 0.85 }}
-            animate={{ opacity: 1, scale: 1 }}
-            exit={{ opacity: 0, scale: 0.85 }}
-            transition={{ duration: 0.18, ease: 'easeInOut' }}
-            onClick={() => {
-              setFormData(prev => ({
-                ...prev,
-                customer_id: customerId ? customerId.toString() : prev.customer_id,
-                date: getLocalDateKey(),
-              }));
-              setIsModalOpen(true);
-            }}
-            className="hidden sm:flex fixed top-24 right-6 z-[60] items-center gap-2 bg-emerald-600 text-white px-4 py-3 rounded-2xl font-black shadow-lg shadow-emerald-100 hover:bg-emerald-700 transition-colors active:scale-95 touch-btn"
-            aria-label="Add entry"
-          >
-            <Plus size={18} /> {t('newEntry')}
-          </motion.button>
-        )}
-      </AnimatePresence>
-
-      {/* Sticky Add Entry: mobile — hidden while sheet is open */}
-      <AnimatePresence>
-        {(isAdmin || isVendor || Boolean(customerId)) && !isModalOpen && (
-          <motion.div
-            key="fab-mobile"
-            initial={{ opacity: 0, y: 16 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: 16 }}
-            transition={{ duration: 0.18, ease: 'easeInOut' }}
-            className="sm:hidden fixed bottom-24 right-4 z-[90] px-3 pb-4 pt-2 safe-area-inset-bottom"
-          >
-            <button
-              onClick={() => {
-                setFormData(prev => ({
-                  ...prev,
-                  customer_id: customerId ? customerId.toString() : prev.customer_id,
-                  date: getLocalDateKey(),
-                }));
-                setIsModalOpen(true);
-              }}
-              className="w-auto bg-emerald-600 text-white px-4 py-3 rounded-2xl font-black shadow-lg shadow-emerald-100 hover:bg-emerald-700 transition-colors active:scale-95 touch-btn"
-              aria-label="Add entry"
-            >
-              <span className="inline-flex items-center justify-center gap-2">
-                <Plus size={18} /> {t('newEntry')}
-              </span>
-            </button>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
 
       <AnimatePresence>
 
@@ -872,19 +846,16 @@ export default function MilkEntries({
         ))}
       </div>
 
-      {/* Bottom Sheet */}
+      {/* Milk Entry Modal */}
       {isModalOpen && (
-        <div className="sheet-overlay">
+        <div className="milk-entry-modal-overlay">
           <motion.div 
-            initial={{ opacity: 0, y: 60 }}
+            initial={{ opacity: 0, y: -16 }}
             animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: 60 }}
-            transition={{ type: 'spring', stiffness: 340, damping: 30 }}
-            className="sheet-panel"
+            exit={{ opacity: 0, y: -8 }}
+            transition={{ duration: 0.2, ease: 'easeOut' }}
+            className="milk-entry-modal-panel"
           >
-            {/* Drag handle */}
-            <div className="w-10 h-1 bg-slate-200 rounded-full mx-auto mt-3 mb-1 sm:hidden flex-shrink-0" />
-
             {/* Fixed header */}
             <div className="flex-shrink-0 px-5 sm:px-8 py-4 border-b border-slate-50 flex justify-between items-center">
               <div>
@@ -892,7 +863,9 @@ export default function MilkEntries({
                 <p className="text-[10px] text-slate-400 font-black uppercase tracking-widest mt-0.5">{t('supplyReconciliation')}</p>
               </div>
               <button 
+                type="button"
                 onClick={() => setIsModalOpen(false)} 
+                aria-label={t('close')}
                 className="w-9 h-9 rounded-full bg-slate-50 flex items-center justify-center text-slate-400 hover:text-rose-500 hover:bg-rose-50 transition-all touch-btn"
               >
                 <Plus size={20} className="rotate-45" />

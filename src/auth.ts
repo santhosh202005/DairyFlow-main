@@ -2,6 +2,7 @@ export type AuthRole = 'admin' | 'customer' | 'vendor' | 'worker';
 
 export type StoredAuth = {
   token: string;
+  announcementSessionToken?: string;
   role: AuthRole;
   customerId?: string;
   customerName?: string;
@@ -27,6 +28,7 @@ export type LoginAuth = Omit<StoredAuth, 'token' | 'role'> & {
 
 const KEYS = {
   token: 'dairy_auth_token',
+  announcementSessionToken: 'dairy_announcement_session_token',
   role: 'dairy_auth_role',
   customerId: 'dairy_auth_customer_id',
   customerName: 'dairy_auth_customer_name',
@@ -48,6 +50,7 @@ const KEYS = {
 
 export function loadStoredAuth(): StoredAuth | null {
   const token = localStorage.getItem(KEYS.token);
+  const announcementSessionToken = localStorage.getItem(KEYS.announcementSessionToken) || undefined;
   const role = localStorage.getItem(KEYS.role) as AuthRole | null;
   if (!token || !role) return null;
 
@@ -70,6 +73,7 @@ export function loadStoredAuth(): StoredAuth | null {
 
   return {
     token,
+    announcementSessionToken,
     role,
     customerId,
     customerName,
@@ -97,6 +101,8 @@ export function storeAuth(auth: StoredAuth) {
     vendorName: auth.vendorName,
   });
   localStorage.setItem(KEYS.token, auth.token);
+  if (auth.announcementSessionToken) localStorage.setItem(KEYS.announcementSessionToken, auth.announcementSessionToken);
+  else localStorage.removeItem(KEYS.announcementSessionToken);
   localStorage.setItem(KEYS.role, auth.role);
 
   if (auth.customerId) localStorage.setItem(KEYS.customerId, auth.customerId);
@@ -169,6 +175,7 @@ export function storeAuth(auth: StoredAuth) {
 
 export function clearAuth() {
   localStorage.removeItem(KEYS.token);
+  localStorage.removeItem(KEYS.announcementSessionToken);
   localStorage.removeItem(KEYS.role);
   localStorage.removeItem(KEYS.customerId);
   localStorage.removeItem(KEYS.customerName);
@@ -195,4 +202,3 @@ export function setStoredLanguage(lang: string | null) {
   if (lang) localStorage.setItem(KEYS.language, lang);
   else localStorage.removeItem(KEYS.language);
 }
-

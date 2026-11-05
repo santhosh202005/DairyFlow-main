@@ -29,6 +29,7 @@ interface SendMoneyModalProps {
   upiId?: string;
   phone?: string;
   note?: string;
+  salaryMonth?: string;
   onPaymentRecorded?: () => void;
 }
 
@@ -45,6 +46,7 @@ export default function SendMoneyModal({
   upiId,
   phone,
   note = 'DairyFlow Payout',
+  salaryMonth,
   onPaymentRecorded,
 }: SendMoneyModalProps) {
   const { t } = useTranslation();
@@ -130,11 +132,17 @@ export default function SendMoneyModal({
           reference_no: refNo || null,
           date: today,
           note,
+          salary_month: recipientType === 'worker' ? salaryMonth || null : null,
         }),
       });
 
       if (res.ok) {
         setRecordedSuccess(true);
+        if (recipientType === 'worker') {
+          window.dispatchEvent(new CustomEvent('worker-salary-payment-recorded', {
+            detail: { recipientId, salaryMonth },
+          }));
+        }
         if (onPaymentRecorded) onPaymentRecorded();
         setTimeout(() => {
           setRecordedSuccess(false);
@@ -452,4 +460,3 @@ export default function SendMoneyModal({
     </AnimatePresence>
   );
 }
-

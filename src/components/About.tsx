@@ -1,13 +1,14 @@
 import React, { useState } from 'react';
-import { Info, ShieldCheck, Zap, Heart, X, Phone, Copy, MapPin, Building2 } from 'lucide-react';
+import { Info, ShieldCheck, Zap, Heart, X, Mail, UserRound, Phone, Copy, MapPin, Building2 } from 'lucide-react';
 
 interface AboutProps {
+  isVendor?: boolean;
   vendorName?: string;
   vendorPhone?: string;
   vendorAddress?: string;
 }
 
-export default function About({ vendorName, vendorPhone, vendorAddress }: AboutProps) {
+export default function About({ isVendor = false, vendorName, vendorPhone, vendorAddress }: AboutProps) {
   const [showSupport, setShowSupport] = useState(false);
 
   const handleCopyPhone = () => {
@@ -85,7 +86,7 @@ export default function About({ vendorName, vendorPhone, vendorAddress }: AboutP
             onClick={() => setShowSupport(true)}
             className="px-6 py-3 border border-slate-700 hover:bg-slate-800 rounded-xl font-bold transition-colors cursor-pointer"
           >
-            Contact Vendor Support
+            {isVendor ? 'Contact Administrative Support' : 'Contact Vendor Support'}
           </div>
         </div>
       </section>
@@ -100,7 +101,9 @@ export default function About({ vendorName, vendorPhone, vendorAddress }: AboutP
           <div className="bg-white rounded-[2rem] w-full max-w-md overflow-hidden shadow-2xl relative animate-in fade-in zoom-in duration-200">
             <div className="p-6 md:p-8 space-y-6">
               <div className="flex justify-between items-center">
-                <h3 className="text-2xl font-bold text-slate-900">Contact Vendor Support</h3>
+                <h3 className="text-2xl font-bold text-slate-900">
+                  {isVendor ? 'Administrative Support' : 'Contact Vendor Support'}
+                </h3>
                 <button 
                   onClick={() => setShowSupport(false)}
                   className="w-10 h-10 flex items-center justify-center rounded-full bg-slate-100 text-slate-500 hover:bg-slate-200 transition-colors"
@@ -110,54 +113,90 @@ export default function About({ vendorName, vendorPhone, vendorAddress }: AboutP
               </div>
 
               <div className="space-y-4">
-                <div className="flex items-start gap-4">
-                  <div className="w-10 h-10 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center shrink-0">
-                    <Building2 size={20} />
-                  </div>
-                  <div>
-                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-0.5">Vendor Name</p>
-                    <p className="font-bold text-slate-900">{vendorName || 'N/A'}</p>
-                  </div>
-                </div>
-
-                <div className="flex items-start gap-4">
-                  <div className="w-10 h-10 rounded-xl bg-violet-50 text-violet-600 flex items-center justify-center shrink-0">
-                    <Phone size={20} />
-                  </div>
-                  <div>
-                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-0.5">Vendor Phone</p>
-                    <p className="font-bold text-slate-900">{vendorPhone || 'Not Provided'}</p>
-                  </div>
-                </div>
-
-                <div className="flex items-start gap-4">
-                  <div className="w-10 h-10 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center shrink-0">
-                    <MapPin size={20} />
-                  </div>
-                  <div>
-                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-0.5">Vendor Address</p>
-                    <p className="font-bold text-slate-900 text-sm leading-relaxed whitespace-pre-line">
-                      {vendorAddress || 'No address details provided.'}
-                    </p>
-                  </div>
-                </div>
+                {isVendor ? (
+                  <>
+                    <div className="flex items-start gap-4">
+                      <div className="w-10 h-10 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center shrink-0">
+                        <UserRound size={20} />
+                      </div>
+                      <div>
+                        <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-0.5">Admin Name</p>
+                        <p className="font-bold text-slate-900">DairyFlow</p>
+                      </div>
+                    </div>
+                    <div className="flex items-start gap-4">
+                      <div className="w-10 h-10 rounded-xl bg-violet-50 text-violet-600 flex items-center justify-center shrink-0">
+                        <Mail size={20} />
+                      </div>
+                      <div>
+                        <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-0.5">Email</p>
+                        <a href="mailto:admindairyflow@gmail.com" className="font-bold text-emerald-700 hover:text-emerald-800">
+                          admindairyflow@gmail.com
+                        </a>
+                      </div>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div className="flex items-start gap-4">
+                      <div className="w-10 h-10 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center shrink-0">
+                        <Building2 size={20} />
+                      </div>
+                      <div>
+                        <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-0.5">Vendor Name</p>
+                        <p className="font-bold text-slate-900">{vendorName || 'N/A'}</p>
+                      </div>
+                    </div>
+                    <div className="flex items-start gap-4">
+                      <div className="w-10 h-10 rounded-xl bg-violet-50 text-violet-600 flex items-center justify-center shrink-0">
+                        <Phone size={20} />
+                      </div>
+                      <div>
+                        <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-0.5">Vendor Phone</p>
+                        <p className="font-bold text-slate-900">{vendorPhone || 'Not Provided'}</p>
+                      </div>
+                    </div>
+                    <div className="flex items-start gap-4">
+                      <div className="w-10 h-10 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center shrink-0">
+                        <MapPin size={20} />
+                      </div>
+                      <div>
+                        <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-0.5">Vendor Address</p>
+                        <p className="font-bold text-slate-900 text-sm leading-relaxed whitespace-pre-line">
+                          {vendorAddress || 'No address details provided.'}
+                        </p>
+                      </div>
+                    </div>
+                  </>
+                )}
               </div>
 
-              <div className="pt-4 border-t border-slate-100 flex flex-col sm:flex-row gap-3">
-                {vendorPhone && (
-                  <a 
-                    href={`tel:${vendorPhone}`}
-                    className="flex-1 bg-emerald-600 text-white flex items-center justify-center gap-2 py-3 rounded-xl font-bold shadow-lg shadow-emerald-100 hover:bg-emerald-700 active:scale-95 transition-all"
+              <div className="pt-4 border-t border-slate-100">
+                {isVendor ? (
+                  <a
+                    href="mailto:admindairyflow@gmail.com"
+                    className="w-full bg-emerald-600 text-white flex items-center justify-center gap-2 py-3 rounded-xl font-bold shadow-lg shadow-emerald-100 hover:bg-emerald-700 active:scale-[0.98] transition-all"
                   >
-                    <Phone size={18} /> Call Vendor
+                    <Mail size={18} /> Email Administrative Support
                   </a>
+                ) : (
+                  <div className="flex flex-col sm:flex-row gap-3">
+                    {vendorPhone && (
+                      <a
+                        href={`tel:${vendorPhone}`}
+                        className="flex-1 bg-emerald-600 text-white flex items-center justify-center gap-2 py-3 rounded-xl font-bold shadow-lg shadow-emerald-100 hover:bg-emerald-700 active:scale-95 transition-all"
+                      >
+                        <Phone size={18} /> Call Vendor
+                      </a>
+                    )}
+                    <button
+                      onClick={handleCopyPhone}
+                      className="flex-1 bg-white border-2 border-slate-200 text-slate-700 flex items-center justify-center gap-2 py-3 rounded-xl font-bold hover:bg-slate-50 hover:border-slate-300 active:scale-95 transition-all"
+                    >
+                      <Copy size={18} /> Copy Phone
+                    </button>
+                  </div>
                 )}
-                <button 
-                  onClick={handleCopyPhone}
-                  className="flex-1 bg-white border-2 border-slate-200 text-slate-700 flex items-center justify-center gap-2 py-3 rounded-xl font-bold hover:bg-slate-50 hover:border-slate-300 active:scale-95 transition-all"
-                >
-                  <Copy size={18} /> Copy Phone
-                </button>
               </div>
             </div>
           </div>

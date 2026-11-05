@@ -24,10 +24,10 @@ import {
   Phone,
   MapPin,
   Store,
-  ClipboardCheck,
-  IndianRupee,
-  ShieldCheck,
   ClipboardList,
+  BellRing,
+  ArrowLeft,
+  Loader2,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import Dashboard from './components/Dashboard';
@@ -68,12 +68,14 @@ import LoadingScreen from './components/LoadingScreen';
 import NetworkStatusModal from './components/NetworkStatusModal';
 import UpdateAvailableModal from './components/UpdateAvailableModal';
 import { useMissingEntries, MissingEntriesModal, NotificationBell } from './components/MissingEntriesAlert';
+import Announcements from './components/Announcements';
+import VendorMessagesAdmin from './components/VendorMessagesAdmin';
 
 const CURRENT_APP_VERSION = import.meta.env.VITE_APP_VERSION || '1.0.10';
 const AVAILABLE_APP_VERSION = import.meta.env.VITE_LATEST_APP_VERSION || CURRENT_APP_VERSION;
 const UPDATE_DISMISSED_KEY = 'dairyflow_update_dismissed';
 
-type View = 'dashboard' | 'customers' | 'entries' | 'advances' | 'feed' | 'cattle' | 'settings' | 'vendors' | 'vendor-requests' | 'workers' | 'attendance' | 'salary' | 'my-reports' | 'manual' | 'billing';
+type View = 'dashboard' | 'customers' | 'entries' | 'advances' | 'feed' | 'cattle' | 'settings' | 'vendors' | 'vendor-requests' | 'workers' | 'attendance' | 'salary' | 'my-reports' | 'manual' | 'billing' | 'announcements' | 'vendor-messages' | 'alerts';
 
 function isNewerVersion(current: string, available: string) {
   const currentParts = current.split('.').map(Number);
@@ -98,16 +100,41 @@ export default function App() {
   });
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [isProfileOpen, setIsProfileOpen] = useState(false);
+  const [settingsReturnView, setSettingsReturnView] = useState(false);
+  const [isPageNavigationLoading, setIsPageNavigationLoading] = useState(false);
+  const pageNavigationTimer = useRef<number | null>(null);
+  const mobileNavScrollRef = useRef<HTMLDivElement>(null);
   const [entryPrefill, setEntryPrefill] = useState<{
     shift?: 'AM' | 'PM';
     customerId?: string;
+    date?: string;
     autoOpen?: boolean;
   }>({});
   const loginGeneration = useRef(0);
+
+  const navigateToView = (view: View) => {
+    if (view === activeView) return;
+    if (pageNavigationTimer.current !== null) {
+      window.clearTimeout(pageNavigationTimer.current);
+    }
+    setIsPageNavigationLoading(true);
+    setActiveView(view);
+    pageNavigationTimer.current = window.setTimeout(() => {
+      setIsPageNavigationLoading(false);
+      pageNavigationTimer.current = null;
+    }, 1200);
+  };
+
+  useEffect(() => () => {
+    if (pageNavigationTimer.current !== null) {
+      window.clearTimeout(pageNavigationTimer.current);
+    }
+  }, []);
   
   const [authData, setAuthData] = useState<{
     token: string | null;
     role: string | null;
+    announcementSessionToken?: string;
     customerId?: string;
     customerName?: string;
     customerCode?: string;
@@ -129,6 +156,7 @@ export default function App() {
     return {
       token: stored.token,
       role: stored.role,
+      announcementSessionToken: stored.announcementSessionToken,
       customerId: stored.customerId,
       customerName: stored.customerName,
       customerCode: stored.customerCode,
@@ -150,6 +178,17 @@ export default function App() {
   // Keep `useIsMobile` call unconditional to preserve hook order across renders
   const isMobile = useIsMobile();
 
+  useEffect(() => {
+    if (!isMobile || !mobileNavScrollRef.current) return;
+    const nav = mobileNavScrollRef.current;
+    const activeButton = nav.querySelector<HTMLButtonElement>(`[data-nav-id="${activeView}"]`);
+    if (!activeButton) return;
+    const navRect = nav.getBoundingClientRect();
+    const buttonRect = activeButton.getBoundingClientRect();
+    const left = nav.scrollLeft + buttonRect.left - navRect.left - (nav.clientWidth - buttonRect.width) / 2;
+    nav.scrollTo({ left, behavior: 'smooth' });
+  }, [activeView, isMobile]);
+
   const [isInitialLoading, setIsInitialLoading] = useState(true);
   const [isSplashFadingOut, setIsSplashFadingOut] = useState(false);
   const [isSplashComplete, setIsSplashComplete] = useState(false);
@@ -166,13 +205,14 @@ export default function App() {
     vendorId: authData.vendorId,
   });
 
-  const handleEnterMilk = (shift?: 'AM' | 'PM', targetCustomerId?: string) => {
+  const handleEnterMilk = (shift?: 'AM' | 'PM', targetCustomerId?: string, targetDate?: string) => {
     setEntryPrefill({
       shift,
       customerId: targetCustomerId,
+      date: targetDate,
       autoOpen: true,
     });
-    setActiveView('entries');
+    navigateToView('entries');
   };
 
   const handleEntryPrefillHandled = () => {
@@ -208,9 +248,16 @@ export default function App() {
     setIsUpdateCheckComplete(true);
   }, [isSplashComplete]);
 
-  const { t } = useTranslation();
+  const { t, lang } = useTranslation();
 
   const handleLogout = () => {
+    const sessionToken = loadStoredAuth()?.announcementSessionToken;
+    if (sessionToken) {
+      void fetch('/api/announcements/session', {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${sessionToken}` },
+      }).catch((error) => console.warn('[Auth] Could not revoke announcement session:', error));
+    }
     clearAuth();
     setActiveView('dashboard');
     setIsProfileOpen(false);
@@ -271,7 +318,9 @@ export default function App() {
     didRun = true;
 
     const stored = loadStoredAuth();
-    const token = stored?.token;
+    const token = stored?.role === 'vendor'
+      ? stored.announcementSessionToken
+      : stored?.token;
 
     console.log('[Auth] Starting session verification. HasToken=', !!token);
 
@@ -284,12 +333,27 @@ export default function App() {
       return;
     }
 
+    if ((stored?.role === 'vendor' || stored?.role === 'customer' || stored?.role === 'worker') && !stored.announcementSessionToken) {
+      redirectToLogin('announcement session refresh required');
+      return;
+    }
+
     // Vendor login already persisted the complete vendor profile. Do not block
     // startup on the secondary session endpoint, which may be unavailable while
     // the production backend is waking up.
     if (stored?.role === 'vendor') {
-      console.log('[Auth] Restoring stored vendor session without blocking startup.');
-      setIsVerifying(false);
+      apiFetch('/api/announcements/session', {
+        headers: { Authorization: `Bearer ${stored.announcementSessionToken}` },
+      }, { retries: 0 }).then(() => {
+        console.log('[Auth] Restoring stored vendor session.');
+        setIsVerifying(false);
+      }).catch((error) => {
+        if (String((error as any)?.message || error).includes('HTTP 401')) {
+          redirectToLogin('announcement session expired');
+        } else {
+          keepStoredSession('announcement session verification unavailable');
+        }
+      });
       return;
     }
 
@@ -312,11 +376,17 @@ export default function App() {
           );
 
           if (data?.success) {
+            if (stored?.role === 'customer' || stored?.role === 'worker') {
+              await apiFetch('/api/announcements/session', {
+                headers: { Authorization: `Bearer ${stored.announcementSessionToken}` },
+              }, { retries: 0 });
+            }
             if (loginGeneration.current !== verificationGeneration) return 'unavailable';
             console.log('[Auth] Token valid.');
             setAuthData({
               token: sessionToken,
               role: data.role,
+              announcementSessionToken: stored?.announcementSessionToken,
               customerId: data.customerId?.toString(),
               customerName: data.customerName,
               customerCode: data.customerCode,
@@ -419,12 +489,14 @@ export default function App() {
     workerId?: string,
     workerName?: string,
     workerPhone?: string,
+    announcementSessionToken?: string,
   ) => {
     loginGeneration.current += 1;
     const normalizedRole = role.toLowerCase();
     const nextAuthData = {
       token,
       role: normalizedRole,
+      announcementSessionToken,
       customerId,
       customerName,
       customerCode,
@@ -447,6 +519,7 @@ export default function App() {
     const loginAuth: LoginAuth = {
       token,
       role: normalizedRole,
+      announcementSessionToken,
       customerId,
       customerName,
       customerCode,
@@ -501,6 +574,7 @@ export default function App() {
         setAuthData({
           token,
           role: me.role,
+          announcementSessionToken,
           customerId: me.customerId?.toString(),
           customerName: me.customerName,
           customerCode: me.customerCode,
@@ -559,36 +633,63 @@ export default function App() {
       { id: 'vendors', label: navLabel('vendors', 'Vendors'), icon: Store },
       { id: 'vendor-requests', label: 'Pending Requests', icon: ClipboardList },
       { id: 'customers', label: navLabel('farmers', 'Farmers'), icon: Users },
+      { id: 'vendor-messages', label: navLabel('vendorMessages', 'Vendor Messages'), icon: BellRing },
     ] : [
       { id: 'dashboard', label: navLabel('monitor', 'Monitor'), icon: LayoutDashboard },
     ]),
-    { id: 'manual', label: 'Manual', icon: Info },
+    ...(authData.role === 'customer' || authData.role === 'vendor' || authData.role === 'worker'
+      ? [{ id: 'alerts', label: navLabel('notificationsLabel', 'Notifications'), icon: BellRing }]
+      : []),
+    ...(authData.role === 'admin' || authData.role === 'worker'
+      ? [{ id: 'manual', label: navLabel('manual', 'Manual'), icon: Info }]
+      : []),
     ...(authData.role === 'vendor' ? [
       { id: 'workers', label: navLabel('workers', 'Workers'), icon: Store },
-      { id: 'attendance', label: navLabel('attendance', 'Attendance'), icon: ClipboardCheck },
-      { id: 'salary', label: navLabel('salary', 'Salary'), icon: IndianRupee },
       { id: 'customers', label: navLabel('farmers', 'Farmers'), icon: Users },
       { id: 'entries', label: navLabel('logistics', 'Logistics'), icon: Milk },
-      { id: 'billing', label: navLabel('billing', 'Reports & Bills'), icon: FileText },
+      { id: 'billing', label: navLabel('reportsBilling', 'Reports & Billing'), icon: FileText },
       { id: 'advances', label: navLabel('ledger', 'Ledger'), icon: Wallet },
       { id: 'feed', label: navLabel('resources', 'Resources'), icon: Package },
-      { id: 'cattle', label: navLabel('cattleRecords', 'Cattle & Vaccines'), icon: ShieldCheck },
     ] : authData.role === 'worker' ? [
       { id: 'entries', label: navLabel('logistics', 'Logistics'), icon: Milk },
       { id: 'my-reports', label: navLabel('myReports', 'My Salary & Reports'), icon: FileText },
     ] : authData.role === 'customer' ? [
       { id: 'entries', label: navLabel('mySupply', 'My Supply'), icon: Milk },
       { id: 'billing', label: navLabel('myReports', 'My Reports & Bills'), icon: FileText },
-      { id: 'cattle', label: navLabel('cattleRecords', 'Cattle & Vaccines'), icon: ShieldCheck },
       { id: 'advances', label: navLabel('myLedger', 'My Ledger'), icon: Wallet },
       { id: 'feed', label: navLabel('myStocks', 'My Stocks'), icon: Package },
     ] : []),
     { id: 'settings', label: navLabel('settings', 'Settings'), icon: SettingsIcon },
   ];
 
+  const backToSettingsButton = settingsReturnView && (
+    <button
+      type="button"
+      onClick={() => {
+        setSettingsReturnView(false);
+        navigateToView('settings');
+      }}
+      className="mb-4 inline-flex min-h-11 items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-bold text-slate-700 shadow-sm transition hover:border-emerald-200 hover:bg-emerald-50 hover:text-emerald-800"
+    >
+      <ArrowLeft size={17} />
+      {t('backToSettings')}
+    </button>
+  );
 
   return (
     <div className="min-h-screen bg-[#F9FAFB] flex font-sans text-slate-900">
+      {isPageNavigationLoading && (
+        <div
+          role="status"
+          aria-live="polite"
+          className="fixed inset-0 z-[200] flex items-center justify-center bg-slate-900/20 p-4 backdrop-blur-sm"
+        >
+          <div className="flex min-w-48 flex-col items-center gap-3 rounded-2xl border border-slate-100 bg-white px-8 py-6 shadow-xl">
+            <Loader2 size={30} className="animate-spin text-emerald-600" />
+            <span className="text-sm font-semibold text-slate-700">{t('loading')}</span>
+          </div>
+        </div>
+      )}
       {/* Sidebar — desktop only */}
       <aside 
         className={`bg-white border-r border-slate-200 transition-all duration-500 ease-in-out flex-col relative z-20 ${
@@ -621,7 +722,10 @@ export default function App() {
             return (
               <button
                 key={item.id}
-                onClick={() => setActiveView(item.id as View)}
+                onClick={() => {
+                  setSettingsReturnView(false);
+                  navigateToView(item.id as View);
+                }}
                 className={`w-full flex items-center gap-4 p-4 rounded-2xl transition-all relative group ${
                   isActive 
                     ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-100' 
@@ -660,7 +764,9 @@ export default function App() {
             <div className="w-9 h-9 rounded-xl bg-transparent overflow-hidden shrink-0 md:hidden">
               <img src="/new%20dairy%20flow.png" alt="DairyFlow Logo" className="w-full h-full object-contain drop-shadow-[0_3px_8px_rgba(16,185,129,0.18)]" />
             </div>
-            <h1 className="text-[17px] md:text-3xl font-display font-bold text-slate-900 tracking-tight capitalize truncate max-w-[35vw] md:max-w-none">
+            <h1 className={`text-[17px] md:text-3xl font-display font-bold text-slate-900 tracking-tight capitalize max-w-[45vw] md:max-w-none ${
+              lang === 'ta' ? 'whitespace-normal break-words' : 'truncate'
+            }`}>
               {activeView === 'dashboard' ? t('dashboard') 
                 : activeView === 'customers' ? t('farmers')
                 : activeView === 'entries' ? t('milkSupply')
@@ -669,6 +775,10 @@ export default function App() {
                 : activeView === 'feed' ? t('cattleFeed')
                 : activeView === 'cattle' ? (t('cattleManagement') || 'Farm & Cattle')
                 : activeView === 'vendor-requests' ? 'Pending Vendor Requests'
+                : activeView === 'vendor-messages' ? t('vendorMessagePageTitle')
+                : activeView === 'announcements' ? t('announcementsPageTitle')
+                : activeView === 'alerts' ? t('notificationsAndAlerts')
+                : activeView === 'manual' ? t('manualPageTitle')
                 : activeView === 'settings' ? t('settings')
                 : (activeView as string).replace('-', ' ')}
             </h1>
@@ -685,12 +795,31 @@ export default function App() {
               </span>
             </div>
 
-            {/* Notification Bell for Customer & Vendor */}
+            {/* Notifications are available to customers, vendors, and workers. */}
             <NotificationBell
               data={missingData}
               role={authData.role}
               onEnterMilk={handleEnterMilk}
+              onNavigate={(view) => navigateToView(view as View)}
+              activeView={activeView}
+              announcementSessionToken={authData.announcementSessionToken}
+              onSessionExpired={handleLogout}
             />
+            {authData.role === 'admin' && (
+              <button
+                type="button"
+                onClick={() => navigateToView('vendor-messages')}
+                className={`relative flex min-h-11 min-w-11 items-center justify-center rounded-xl border p-2.5 transition-colors ${
+                  activeView === 'vendor-messages'
+                    ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                    : 'border-slate-200 bg-white text-slate-500 hover:bg-slate-50 hover:text-slate-700'
+                }`}
+                title={t('sendVendorNotification')}
+                aria-label={t('sendVendorNotification')}
+              >
+                <BellRing size={19} />
+              </button>
+            )}
 
             <div 
               onClick={() => setIsProfileOpen(!isProfileOpen)}
@@ -749,7 +878,8 @@ export default function App() {
                     <div className="p-2">
                       <button 
                         onClick={() => {
-                          setActiveView('settings');
+                          setSettingsReturnView(false);
+                          navigateToView('settings');
                           setIsProfileOpen(false);
                         }}
                         className="w-full flex items-center gap-3 px-3 py-2.5 text-sm font-medium text-slate-600 hover:text-emerald-600 hover:bg-emerald-50 rounded-xl transition-colors cursor-pointer"
@@ -759,7 +889,8 @@ export default function App() {
                       </button>
                       <button 
                         onClick={() => {
-                          setActiveView('settings');
+                          setSettingsReturnView(false);
+                          navigateToView('settings');
                           setIsProfileOpen(false);
                         }}
                         className="w-full flex items-center gap-3 px-3 py-2.5 text-sm font-medium text-slate-600 hover:text-emerald-600 hover:bg-emerald-50 rounded-xl transition-colors cursor-pointer"
@@ -787,7 +918,7 @@ export default function App() {
           </div>
         </header>
 
-        <div className="p-3 md:p-10 max-w-7xl mx-auto flex-1 mobile-bottom-padding">
+        <div className="relative p-3 md:p-10 max-w-7xl mx-auto flex-1 mobile-bottom-padding">
           <AnimatePresence mode="wait">
             <motion.div
               key={activeView}
@@ -800,18 +931,48 @@ export default function App() {
                 damping: 20 
               }}
             >
-              {activeView === 'dashboard' && <Dashboard customerId={authData.customerId} vendorId={authData.vendorId} workerId={authData.workerId} onNavigate={setActiveView} missingData={missingData} onEnterMilk={handleEnterMilk} />}
-              {activeView === 'manual' && <UserManual userRole={authData.role ?? undefined} />}
+              {activeView === 'dashboard' && <Dashboard customerId={authData.customerId} vendorId={authData.vendorId} workerId={authData.workerId} onNavigate={navigateToView} missingData={missingData} onEnterMilk={handleEnterMilk} />}
+              {activeView === 'manual' && <>{backToSettingsButton}<UserManual userRole={authData.role ?? undefined} /></>}
               {activeView === 'vendors' && authData.role === 'admin' && (
-                <VendorManagement onNavigateToRequests={() => setActiveView('vendor-requests')} />
+                <VendorManagement onNavigateToRequests={() => navigateToView('vendor-requests')} />
               )}
               {activeView === 'vendor-requests' && authData.role === 'admin' && <VendorRequests />}
-              {activeView === 'workers' && authData.role === 'vendor' && <WorkerManagement vendorId={authData.vendorId} />}
-              {activeView === 'attendance' && authData.role === 'vendor' && <WorkerAttendance vendorId={authData.vendorId} />}
-              {activeView === 'salary' && authData.role === 'vendor' && <WorkerSalary vendorId={authData.vendorId} />}
+              {activeView === 'vendor-messages' && authData.role === 'admin' && <VendorMessagesAdmin />}
+              {activeView === 'alerts' && (authData.role === 'customer' || authData.role === 'vendor' || authData.role === 'worker') && (
+                <NotificationBell
+                  data={missingData}
+                  role={authData.role}
+                  onEnterMilk={handleEnterMilk}
+                  onNavigate={(view) => navigateToView(view as View)}
+                  activeView={activeView}
+                  isPage
+                  announcementSessionToken={authData.announcementSessionToken}
+                  onSessionExpired={handleLogout}
+                />
+              )}
+              {activeView === 'announcements' && authData.role === 'vendor' && (
+                <>
+                  {backToSettingsButton}
+                  <Announcements
+                    sessionToken={authData.announcementSessionToken || ''}
+                    onSessionExpired={handleLogout}
+                  />
+                </>
+              )}
+              {activeView === 'workers' && authData.role === 'vendor' && (
+                <div className="space-y-8">
+                  <WorkerManagement vendorId={authData.vendorId} />
+                  <section className="border-t border-slate-200 pt-8">
+                    <WorkerAttendance vendorId={authData.vendorId} />
+                  </section>
+                  <section className="border-t border-slate-200 pt-8">
+                    <WorkerSalary vendorId={authData.vendorId} />
+                  </section>
+                </div>
+              )}
               {activeView === 'my-reports' && authData.role === 'worker' && <WorkerReport workerId={authData.workerId} vendorId={authData.vendorId} workerName={authData.workerName} />}
               {activeView === 'customers' && (authData.role === 'admin' || authData.role === 'vendor') && <Customers vendorId={authData.vendorId} isVendor={authData.role === 'vendor'} readOnly={authData.role === 'admin'} />}
-              {activeView === 'entries' && authData.role !== 'admin' && <MilkEntries customerId={authData.customerId} vendorId={authData.vendorId} workerId={authData.workerId} workerName={authData.workerName} isAdmin={false} isVendor={authData.role === 'vendor' || authData.role === 'worker'} isWorker={authData.role === 'worker'} defaultRate={authData.defaultRate} initialShift={entryPrefill.shift} initialCustomerId={entryPrefill.customerId} autoOpenModal={entryPrefill.autoOpen} onAutoOpenHandled={handleEntryPrefillHandled} />}
+              {activeView === 'entries' && authData.role !== 'admin' && <MilkEntries customerId={authData.customerId} vendorId={authData.vendorId} workerId={authData.workerId} workerName={authData.workerName} isAdmin={false} isVendor={authData.role === 'vendor' || authData.role === 'worker'} isWorker={authData.role === 'worker'} defaultRate={authData.defaultRate} initialShift={entryPrefill.shift} initialCustomerId={entryPrefill.customerId} initialDate={entryPrefill.date} autoOpenModal={entryPrefill.autoOpen} onAutoOpenHandled={handleEntryPrefillHandled} />}
               {activeView === 'billing' && (
                 <Billing 
                   customerId={authData.customerId} 
@@ -823,18 +984,25 @@ export default function App() {
               {activeView === 'advances' && authData.role !== 'admin' && authData.role !== 'worker' && <Advances customerId={authData.customerId} vendorId={authData.vendorId} isAdmin={false} isVendor={authData.role === 'vendor'} />}
               {activeView === 'feed' && authData.role !== 'admin' && authData.role !== 'worker' && <CattleFeed customerId={authData.customerId} vendorId={authData.vendorId} isAdmin={false} isVendor={authData.role === 'vendor'} />}
               {activeView === 'cattle' && (authData.role === 'customer' || authData.role === 'vendor' || authData.role === 'admin') && (
-                <CattleManagement 
-                  customerId={authData.customerId} 
-                  vendorId={authData.vendorId} 
-                  isAdmin={authData.role === 'admin'} 
-                  isVendor={authData.role === 'vendor'} 
-                  isFarmer={authData.role === 'customer'} 
-                />
+                <>
+                  {backToSettingsButton}
+                  <CattleManagement
+                    customerId={authData.customerId}
+                    vendorId={authData.vendorId}
+                    isAdmin={authData.role === 'admin'}
+                    isVendor={authData.role === 'vendor'}
+                    isFarmer={authData.role === 'customer'}
+                  />
+                </>
               )}
               {activeView === 'settings' && (
                 <Settings 
                   authData={authData} 
                   onLogout={handleLogout} 
+                  onNavigateTo={(view) => {
+                    setSettingsReturnView(true);
+                    navigateToView(view);
+                  }}
                   onProfileUpdate={(pic) => {
                     setAuthData(prev => ({ ...prev, profilePicture: pic }));
                     const stored = loadStoredAuth();
@@ -866,15 +1034,21 @@ export default function App() {
       {/* Mobile Bottom Navigation */}
       {isMobile && (
         <nav className="fixed bottom-0 left-0 right-0 z-[85] bg-white/98 backdrop-blur-xl border-t border-slate-100 shadow-[0_-4px_24px_rgba(0,0,0,0.08)] safe-area-inset-bottom">
-          <div className="flex items-stretch overflow-x-auto scrollbar-none">
+          <div ref={mobileNavScrollRef} className="flex items-stretch overflow-x-auto scrollbar-none">
             {navItems.map((item) => {
               const Icon = item.icon;
               const isActive = activeView === item.id;
               return (
                 <button
                   key={item.id}
-                  onClick={() => setActiveView(item.id as View)}
-                  className={`flex-shrink-0 min-w-[72px] flex flex-col items-center justify-center py-2.5 px-2 transition-all relative touch-btn ${
+                  data-nav-id={item.id}
+                  onClick={() => {
+                    setSettingsReturnView(false);
+                    navigateToView(item.id as View);
+                  }}
+                  className={`flex-shrink-0 flex flex-col items-center justify-center transition-all relative touch-btn ${
+                    lang === 'ta' ? 'min-w-[76px] max-w-[96px] px-1.5 py-2' : 'min-w-[72px] px-2 py-2.5'
+                  } ${
                     isActive ? 'text-emerald-600' : 'text-slate-400'
                   }`}
                 >
@@ -890,7 +1064,9 @@ export default function App() {
                     className="relative z-10 transition-all duration-200"
                     strokeWidth={isActive ? 2.5 : 2}
                   />
-                  <span className={`relative z-10 mt-1 text-center leading-none font-bold whitespace-nowrap ${
+                  <span className={`mobile-nav-label relative z-10 mt-1 text-center font-bold ${
+                    lang === 'ta' ? 'whitespace-normal break-words leading-tight' : 'leading-none whitespace-nowrap'
+                  } ${
                     isActive ? 'text-[11px] text-emerald-600' : 'text-[10px] text-slate-400'
                   }`}>{item.label}</span>
                 </button>
@@ -905,4 +1081,3 @@ export default function App() {
     </div>
   );
 }
-

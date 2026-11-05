@@ -24,6 +24,7 @@ interface LoginProps {
     workerId?: string,
     workerName?: string,
     workerPhone?: string,
+    announcementSessionToken?: string,
   ) => void | Promise<void>;
 }
 
@@ -194,6 +195,7 @@ export default function Login({ onLogin }: LoginProps) {
           storeAuth({
             token: data.token,
             role: 'vendor',
+            announcementSessionToken: data.announcementSessionToken,
             vendorId: data.vendorId?.toString(),
             vendorName: data.vendorName,
             vendorPhone: data.vendorPhone,
@@ -212,6 +214,7 @@ export default function Login({ onLogin }: LoginProps) {
           data.vendorId?.toString(), data.vendorName, data.vendorPhone, data.vendorAddress,
           data.customerCode, data.profilePicture,
           data.workerId?.toString(), data.workerName, data.workerPhone,
+          data.announcementSessionToken,
         );
       } else {
         let msg = data.message || 'Invalid credentials. Please try again.';

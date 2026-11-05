@@ -39,6 +39,7 @@ export default function WorkerAttendancePage({ vendorId }: WorkerAttendanceProps
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [savedMsg, setSavedMsg] = useState('');
+  const [errorMsg, setErrorMsg] = useState('');
   const [selectedDate, setSelectedDate] = useState<string>(
     formatDate(now.getFullYear(), now.getMonth(), now.getDate())
   );
@@ -53,15 +54,26 @@ export default function WorkerAttendancePage({ vendorId }: WorkerAttendanceProps
   };
 
   const fetchData = useCallback(async () => {
-    if (!vendorId) return;
+    if (!vendorId) {
+      setErrorMsg(t('attendanceVendorMissing'));
+      setLoading(false);
+      return;
+    }
     setLoading(true);
+    setErrorMsg('');
+    setWorkers([]);
+    setAttendanceMap({});
     try {
       const [workersRes, attendanceRes] = await Promise.all([
         fetch(`/api/workers?vendorId=${vendorId}`, { headers: getAuthHeaders() }),
         fetch(`/api/worker-attendance?vendorId=${vendorId}&month=${monthStr}`, { headers: getAuthHeaders() }),
       ]);
-      const workersData: Worker[] = workersRes.ok ? await workersRes.json() : [];
-      const attendanceData: (WorkerAttendance & { shift?: string })[] = attendanceRes.ok ? await attendanceRes.json() : [];
+      if (!workersRes.ok || !attendanceRes.ok) {
+        throw new Error(t('attendanceLoadFailed'));
+      }
+
+      const workersData: Worker[] = await workersRes.json();
+      const attendanceData: (WorkerAttendance & { shift?: string })[] = await attendanceRes.json();
 
       setWorkers(workersData);
 
@@ -84,10 +96,11 @@ export default function WorkerAttendancePage({ vendorId }: WorkerAttendanceProps
       setAttendanceMap(map);
     } catch (err) {
       console.error(err);
+      setErrorMsg(err instanceof Error ? err.message : t('attendanceLoadFailed'));
     } finally {
       setLoading(false);
     }
-  }, [vendorId, monthStr]);
+  }, [vendorId, monthStr, t]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
@@ -114,39 +127,52 @@ export default function WorkerAttendancePage({ vendorId }: WorkerAttendanceProps
 
   const handleSave = async () => {
     if (!vendorId) return;
+    const records: { worker_id: string; date: string; status: string; shift: string }[] = [];
+    for (const [workerId, dateShiftMap] of Object.entries(attendanceMap)) {
+      for (const [dateShiftKey, status] of Object.entries(dateShiftMap)) {
+        const [date, shift] = dateShiftKey.split('_');
+        records.push({ worker_id: workerId, date, status, shift });
+      }
+    }
+    if (records.length === 0) {
+      setSavedMsg('');
+      setErrorMsg(t('attendanceNoRecords'));
+      return;
+    }
+
     setSaving(true);
     setSavedMsg('');
+    setErrorMsg('');
     try {
-      const records: { worker_id: string; date: string; status: string; shift: string }[] = [];
-      for (const [workerId, dateShiftMap] of Object.entries(attendanceMap)) {
-        for (const [dateShiftKey, status] of Object.entries(dateShiftMap)) {
-          const [date, shift] = dateShiftKey.split('_');
-          records.push({ worker_id: workerId, date, status, shift });
-        }
-      }
       const res = await fetch('/api/worker-attendance', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
         body: JSON.stringify(records),
       });
-      if (res.ok) {
-        setSavedMsg(t('attendanceSavedSuccessfully'));
-        setTimeout(() => setSavedMsg(''), 3000);
+      if (!res.ok) {
+        throw new Error(t('attendanceSaveFailed'));
       }
+      setSavedMsg(t('attendanceSavedSuccessfully'));
+      setTimeout(() => setSavedMsg(''), 3000);
     } catch (err) {
       console.error(err);
+      setErrorMsg(err instanceof Error ? err.message : t('attendanceSaveFailed'));
     } finally {
       setSaving(false);
     }
   };
 
-  const prevMonth = () => {
-    if (month === 0) { setYear(y => y - 1); setMonth(11); }
-    else setMonth(m => m - 1);
-  };
-  const nextMonth = () => {
-    if (month === 11) { setYear(y => y + 1); setMonth(0); }
-    else setMonth(m => m + 1);
+  const changeMonth = (offset: number) => {
+    const target = new Date(year, month + offset, 1);
+    const targetYear = target.getFullYear();
+    const targetMonth = target.getMonth();
+    const selectedDay = Number(selectedDate.slice(-2));
+    const targetDay = Math.min(selectedDay, getDaysInMonth(targetYear, targetMonth));
+    setYear(targetYear);
+    setMonth(targetMonth);
+    setSelectedDate(formatDate(targetYear, targetMonth, targetDay));
+    setSavedMsg('');
+    setErrorMsg('');
   };
 
   const monthName = new Date(year, month, 1).toLocaleString(locale, { month: 'long', year: 'numeric' });
@@ -204,11 +230,11 @@ export default function WorkerAttendancePage({ vendorId }: WorkerAttendanceProps
 
         {/* Month Nav */}
         <div className="flex items-center gap-2 bg-white border border-slate-200 rounded-2xl p-1.5 shadow-soft">
-          <button onClick={prevMonth} className="w-9 h-9 flex items-center justify-center rounded-xl hover:bg-slate-100 text-slate-500 transition-colors">
+          <button onClick={() => changeMonth(-1)} className="w-9 h-9 flex items-center justify-center rounded-xl hover:bg-slate-100 text-slate-500 transition-colors">
             <ChevronLeft size={18} />
           </button>
           <span className="font-bold text-slate-800 text-sm min-w-[140px] text-center">{monthName}</span>
-          <button onClick={nextMonth} className="w-9 h-9 flex items-center justify-center rounded-xl hover:bg-slate-100 text-slate-500 transition-colors">
+          <button onClick={() => changeMonth(1)} className="w-9 h-9 flex items-center justify-center rounded-xl hover:bg-slate-100 text-slate-500 transition-colors">
             <ChevronRight size={18} />
           </button>
         </div>
@@ -223,9 +249,25 @@ export default function WorkerAttendancePage({ vendorId }: WorkerAttendanceProps
         </motion.div>
       )}
 
+      {errorMsg && (
+        <div role="alert" className="p-3 bg-rose-50 border border-rose-200 text-rose-700 rounded-xl text-sm font-semibold flex items-center gap-2">
+          <AlertCircle size={16} /> {errorMsg}
+        </div>
+      )}
+
       {loading ? (
         <div className="flex items-center justify-center py-20">
           <div className="w-10 h-10 border-4 border-emerald-200 border-t-emerald-600 rounded-full animate-spin" />
+        </div>
+      ) : errorMsg && workers.length === 0 ? (
+        <div className="bg-white rounded-2xl border border-rose-100 p-8 text-center">
+          <button
+            type="button"
+            onClick={fetchData}
+            className="px-4 py-2 bg-emerald-600 text-white rounded-xl font-bold text-sm hover:bg-emerald-700 transition-colors"
+          >
+            {t('retry')}
+          </button>
         </div>
       ) : workers.length === 0 ? (
         <div className="bg-white rounded-2xl border border-slate-100 p-12 text-center">
